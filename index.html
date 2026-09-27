@@ -413,7 +413,7 @@ class UserError extends Error {}
 
 /* ======================= Built-in songs ======================= */
 // Genre = setlist category (filter chip). Every built-in song needs one of these.
-const GENRES = ['Fingerstyle', 'Classic Rock', 'Modern Rock', 'Pop', 'Country & Folk', 'Ballad', 'Reggae', 'Punk'];
+const GENRES = ['Fingerstyle', 'Classic Rock', 'Modern Rock', 'Pop', 'Country & Folk', 'Ballad', 'Reggae', 'Punk', 'Jazz & Blues'];
 const SHAPES = {
   G:  { frets: [3, 2, 0, 0, 0, 3],  fingers: [2, 1, 0, 0, 0, 3] },
   C:  { frets: [-1, 3, 2, 0, 1, 0], fingers: [0, 3, 2, 0, 1, 0] },
@@ -645,7 +645,113 @@ const BUILTINS = [
   ] }),
   ...bandSongs(),
   ...moreSongs(),
+  ...communitySongs(),
 ];
+
+// Third batch: drafted by Gemini from a Pickwork-DSL spec, reviewed and corrected here
+// (chord voicings checked against SHAPES, one wrong-position chord and a stray note
+// fixed, backing-field values verified). Two of the seven requested songs are left out:
+// "House of the Rising Sun" and "Scarborough Fair" are traditional melodies, but the
+// versions everyone actually knows are specific 1960s copyrighted arrangements (The
+// Animals; Simon & Garfunkel), not just the old tune — too close to the real thing to
+// include here. Ask the developer before adding either back in a style clearly
+// distinct from those recordings.
+function communitySongs() {
+  const spanishRomance = built({
+    id: 'spanish-romance', title: 'Spanish Romance', artist: 'Traditional Spanish (19th c.)',
+    genre: 'Fingerstyle', style: 'Classical Romance', bpm: 112, ts: [3, 4], sub: 2, part: 'pluck',
+    bars: [
+      { ch: 'Em', seq: ['a6:7+p1:0', 'm5:7', 'i4:0', 'a6:7', 'm5:7', 'i4:0'] },
+      { ch: 'Em', seq: ['a6:7+p1:0', 'm5:7', 'i4:0', 'a6:7', 'm5:7', 'i4:0'] },
+      { ch: 'Em', seq: ['a6:7+p1:0', 'm5:7', 'i4:0', 'a6:5', 'm5:7', 'i4:0'] },
+      { ch: 'Em', seq: ['a6:3+p1:0', 'm5:0', 'i4:0', 'a6:2', 'm5:0', 'i4:0'] },
+      { ch: 'Em', seq: ['a6:0+p1:0', 'm5:0', 'i4:0', 'a6:0', 'm5:0', 'i4:0'] },
+      { ch: 'Am', seq: ['a6:0+p2:0', 'm5:1', 'i4:2', 'a6:3', 'm5:1', 'i4:2'] },
+      { ch: 'Am', seq: ['a6:5+p2:0', 'm5:1', 'i4:2', 'a6:1', 'm5:1', 'i4:2'] },
+      { ch: 'Em', seq: ['a6:0+p1:0', 'm5:0', 'i4:0', 'a6:0', 'm5:0', 'i4:0'] },
+      { ch: 'B7', seq: ['a6:2+p2:2', 'm5:0', 'i4:2', 'a6:0', 'm5:0', 'i4:2'] },
+      { ch: 'Em', seq: ['a6:0+p1:0', 'm5:0', 'i4:0', 'a6:0', 'm5:0', 'i4:0'] },
+      { ch: 'E', seq: ['a6:4+p1:0', 'm5:0', 'i4:1', 'a6:4', 'm5:0', 'i4:1'] },
+      { ch: 'E', seq: ['a6:4+p1:0', 'm5:0', 'i4:1', 'a6:4', 'm5:0', 'i4:1'] },
+      { ch: 'E', seq: ['a6:4+p1:0', 'm5:0', 'i4:1', 'a6:2', 'm5:0', 'i4:1'] },
+      { ch: 'E', seq: ['a6:0+p1:0', 'm5:0', 'i4:1', 'a6:0', 'm5:0', 'i4:1'] },
+      { ch: 'A', seq: ['a6:0+p2:0', 'm5:2', 'i4:2', 'a6:2', 'm5:2', 'i4:2'] },
+      { ch: 'A', seq: ['a6:4+p2:0', 'm5:2', 'i4:2', 'a6:2', 'm5:2', 'i4:2'] },
+      { ch: 'B7', seq: ['a6:2+p2:2', 'm5:0', 'i4:2', 'a6:0', 'm5:0', 'i4:2'] },
+      { ch: 'Em', seq: ['a6:0+p1:0', 'm5:0', 'i4:0', null, null, null] },
+    ],
+  });
+
+  const bourbonStreet = built({
+    id: 'bourbon-street-stroll', title: 'Bourbon Street Stroll', artist: 'Pickwork original',
+    genre: 'Jazz & Blues', style: 'Swing / jazz blues', bpm: 110, ts: [4, 4], sub: 2, part: 'pluck',
+    bars: [
+      { ch: 'A7', seq: ['p2:0+a5:2', null, 'm4:2', 'i3:0', 'p2:0+a6:3', null, 'm4:2', 'i3:0'] },
+      { ch: 'D7', seq: ['p3:0+a5:1', null, 'm4:2', 'i3:2', 'p3:0+a6:2', null, 'm4:2', 'i3:2'] },
+      { ch: 'A7', seq: ['p2:0+a5:2', null, 'm4:2', 'i3:0', 'p2:0+a6:3', null, 'm4:2', 'i3:0'] },
+      { ch: 'A7', seq: ['p2:0+a6:3', null, 'i4:2', 'm5:2', 'a6:3', 'm5:2', 'i4:2', null] },
+      { ch: 'D7', seq: ['p3:0+a5:1', null, 'm4:2', 'i3:2', 'p3:0+a6:2', null, 'm4:2', 'i3:2'] },
+      { ch: 'D7', seq: ['p3:0+a5:1', null, 'm4:2', 'i3:2', 'p3:0+a6:2', null, 'm4:2', 'i3:2'] },
+      { ch: 'A7', seq: ['p2:0+a5:2', null, 'm4:2', 'i3:0', 'p2:0+a6:3', null, 'm4:2', 'i3:0'] },
+      { ch: 'A7', seq: ['p2:0+a5:2', null, 'm4:2', 'i3:0', 'p2:0+a6:3', null, 'm4:2', 'i3:0'] },
+      { ch: 'E7', seq: ['p1:0+a5:3', null, 'm4:1', 'i3:2', 'p1:0+a6:0', null, 'm4:1', 'i3:2'] },
+      { ch: 'D7', seq: ['p3:0+a5:1', null, 'm4:2', 'i3:2', 'p3:0+a6:2', null, 'm4:2', 'i3:2'] },
+      { ch: 'A7', seq: ['p2:0+a5:2', null, 'm4:2', 'i3:0', 'p2:0', 'i3:2', 'm4:2', 'a5:2'] },
+      { ch: 'E7', seq: ['p1:0+a6:0', null, 'm5:3', 'i4:1', 'p1:0', null, null, null] },
+    ],
+  });
+
+  const wipeout = built({
+    id: 'wipeout-pipeline', title: 'Wipeout Pipeline', artist: 'Pickwork original',
+    genre: 'Classic Rock', style: "'60s surf rock", bpm: 160, sub: 2, part: 'dist',
+    bars: [
+      { ch: 'E5', band: { d: 'rock', b: 'eighths', g: 'chug' }, seq: ['p1:0', 'p1:0', 'p1:3', 'p1:0', 'p1:5', 'p1:0', 'p1:3', 'p1:0'] },
+      { ch: 'E5', band: { d: 'rock', b: 'eighths', g: 'chug' }, seq: ['p1:0', 'p1:0', 'p1:3', 'p1:0', 'p1:5', 'p1:0', 'p1:3', 'p1:0'] },
+      { ch: 'A5', band: { d: 'rock', b: 'eighths', g: 'chug' }, seq: ['p2:0', 'p2:0', 'p2:3', 'p2:0', 'p2:5', 'p2:0', 'p2:3', 'p2:0'] },
+      { ch: 'E5', band: { d: 'rock', b: 'eighths', g: 'chug' }, seq: ['p1:0', 'p1:0', 'p1:3', 'p1:0', 'p1:5', 'p1:0', 'p1:3', 'p1:0'] },
+      { ch: 'B5', band: { d: 'rock', b: 'eighths', g: 'push' }, seq: ['p2:2', 'p2:2', 'p2:5', 'p2:2', 'p2:4', 'p2:2', 'p2:0', 'p1:3'] },
+      { ch: 'A5', band: { d: 'rock', b: 'eighths', g: 'push' }, seq: ['p2:0', 'p2:0', 'p2:3', 'p2:0', 'p2:2', 'p2:0', 'p1:3', 'p1:0'] },
+      { ch: 'E5', band: { d: 'rock', b: 'eighths', g: 'chug', fill: true }, seq: ['p1:0', 'p1:3', 'p1:2', 'p1:0', 'p1:3', 'p1:2', 'p1:0', null] },
+      { ch: 'E5', band: { d: 'rock', b: 'eighths', g: 'ring', crash: true }, seq: ['p1:0+i2:2', null, null, null, null, null, null, null] },
+      { ch: 'E5', band: { d: 'four', b: 'half', g: 'chug' }, seq: ['a6:12', 'a6:12', 'a6:12', 'a6:12', 'a6:10', 'a6:10', 'a6:10', 'a6:10'] },
+      { ch: 'E5', band: { d: 'four', b: 'half', g: 'chug' }, seq: ['a6:8', 'a6:8', 'a6:8', 'a6:8', 'a6:7', 'a6:7', 'a6:7', 'a6:7'] },
+      { ch: 'B5', band: { d: 'boogie', b: 'boogie', g: 'push', crash: true }, seq: ['p2:2+i3:4', 'p2:2+i3:4', 'p2:2+i3:4', 'p2:2+i3:4', 'p2:0', 'p2:0', 'p1:3', 'p1:0'] },
+      { ch: 'E5', band: { d: 'end', b: 'hit', g: 'hit', crash: true }, seq: ['p1:0+i2:2', null, null, null, null, null, null, null] },
+    ],
+  });
+
+  const ironAnvil = built({
+    id: 'iron-anvil', title: 'Iron Anvil', artist: 'Pickwork original',
+    genre: 'Modern Rock', style: 'Heavy metal gallop', bpm: 140, sub: 2, part: 'dist',
+    bars: [
+      { ch: 'E5', band: { d: 'drive', b: 'eighths', g: 'chug' }, seq: ['p1:0+i2:2', 'p1:0', 'p1:0', 'p1:0+i2:2', 'p1:0', 'p1:0', 'p1:3', 'p1:0'] },
+      { ch: 'E5', band: { d: 'drive', b: 'eighths', g: 'chug' }, seq: ['p1:0+i2:2', 'p1:0', 'p1:0', 'p1:0+i2:2', 'p1:0', 'p1:5', 'p1:3', 'p1:0'] },
+      { ch: 'E5', band: { d: 'drive', b: 'eighths', g: 'chug' }, seq: ['p1:0+i2:2', 'p1:0', 'p1:0', 'p1:0+i2:2', 'p1:0', 'p1:0', 'p1:3', 'p1:0'] },
+      { ch: 'G5', band: { d: 'drive', b: 'eighths', g: 'push', fill: true }, seq: ['p1:3+i2:5', null, 'p1:2+i2:4', null, 'p1:3+i2:5', 'p1:2+i2:4', 'p1:0', null] },
+      { ch: 'C5', band: { d: 'rock', b: 'eighths', g: 'push', crash: true }, seq: ['p2:3+i3:5', null, 'p2:3+i3:5', null, 'p2:3+i3:5', 'p2:3+i3:5', 'p2:5', 'p2:3'] },
+      { harm: 'D5', band: { d: 'rock', b: 'eighths', g: 'push' }, seq: ['p2:5+i3:7', null, 'p2:5+i3:7', null, 'p2:5+i3:7', 'p2:5+i3:7', 'p2:7', 'p2:5'] },
+      { ch: 'E5', band: { d: 'rock', b: 'eighths', g: 'chug' }, seq: ['p1:0+i2:2', 'p1:0', 'p1:0', 'p1:0', 'p1:3', 'p1:0', 'p1:2', 'p1:0'] },
+      { ch: 'E5', band: { d: 'end', b: 'hit', g: 'hit', crash: true }, seq: ['p1:0+i2:2', null, null, null, null, null, null, null] },
+    ],
+  });
+
+  const kingston = built({
+    id: 'kingston-skank', title: 'Kingston Skank', artist: 'Pickwork original',
+    genre: 'Reggae', style: 'Roots offbeat skank', bpm: 88, sub: 2, part: 'pluck',
+    bars: [
+      { ch: 'Am', band: { d: 'onedrop', b: 'dub', g: 'skank' }, seq: [null, 'i3:2+m4:2+a5:1', null, 'i3:2+m4:2+a5:1', null, 'i3:2+m4:2+a5:1', null, 'i3:2+m4:2+a5:1'] },
+      { ch: 'Am', band: { d: 'onedrop', b: 'dub', g: 'skank' }, seq: [null, 'i3:2+m4:2+a5:1', null, 'i3:2+m4:2+a5:1', 'p2:0', 'i3:2', 'm4:2', null] },
+      { ch: 'Dm', band: { d: 'onedrop', b: 'dub', g: 'skank' }, seq: [null, 'i4:2+m5:3+a6:1', null, 'i4:2+m5:3+a6:1', null, 'i4:2+m5:3+a6:1', null, 'i4:2+m5:3+a6:1'] },
+      { ch: 'Am', band: { d: 'onedrop', b: 'dub', g: 'skank' }, seq: [null, 'i3:2+m4:2+a5:1', null, 'i3:2+m4:2+a5:1', null, 'i3:2+m4:2+a5:1', null, null] },
+      { ch: 'F', band: { d: 'onedrop', b: 'dub', g: 'skank', crash: true }, seq: [null, 'i3:3+m4:2+a5:1', null, 'i3:3+m4:2+a5:1', null, 'i3:3+m4:2+a5:1', null, 'i3:3+m4:2+a5:1'] },
+      { ch: 'G', band: { d: 'onedrop', b: 'dub', g: 'skank' }, seq: [null, 'i3:0+m4:0+a5:0', null, 'i3:0+m4:0+a5:0', null, 'i3:0+m4:0+a5:0', null, 'i3:0+m4:0+a5:0'] },
+      { ch: 'Am', band: { d: 'onedrop', b: 'dub', g: 'skank', fill: true }, seq: [null, 'i3:2+m4:2+a5:1', null, 'i3:2+m4:2+a5:1', 'p1:0', 'p2:3', 'p2:0', 'p3:2'] },
+      { ch: 'Am', band: { d: 'onedrop', b: 'dub', g: 'ring' }, seq: ['p2:0+i3:2+m4:2+a5:1', null, null, null, null, null, null, null] },
+    ],
+  });
+
+  return [spanishRomance, bourbonStreet, wipeout, ironAnvil, kingston];
+}
 
 function bandSongs() {
   const push3 = (n) => [n, null, null, n, null, null, n, null];
