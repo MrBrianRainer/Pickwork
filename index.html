@@ -349,9 +349,9 @@
   <form method="dialog" class="sheet" id="import-form">
     <div>
       <h2>Import a tab</h2>
-      <p class="sub">Guitar Pro (.gp, .gp3 to .gp7, .gpx), MusicXML, or alphaTex text. Files stay on this device.</p>
+      <p class="sub">Guitar Pro (.gp, .gp3 to .gp7, .gpx), MusicXML, alphaTex text, or a tab PDF (experimental). Files stay on this device.</p>
     </div>
-    <input type="file" id="file" accept=".gp,.gp3,.gp4,.gp5,.gpx,.gp7,.xml,.musicxml,.mxl,.tex,.atex,.txt">
+    <input type="file" id="file" accept=".gp,.gp3,.gp4,.gp5,.gpx,.gp7,.xml,.musicxml,.mxl,.tex,.atex,.txt,.pdf">
     <fieldset>
       <legend>Or paste alphaTex</legend>
       <textarea id="tex" placeholder='\title "My riff" \tempo 90 .&#10;3.5.4 2.4.4 0.3.4 1.2.4 | 3.5.1'></textarea>
@@ -1168,6 +1168,216 @@ async function parseImport(item) {
   } catch {
     throw new UserError('That file couldn’t be read. Pickwork opens Guitar Pro, MusicXML, and alphaTex tabs.');
   }
+}
+
+/* ======================= PDF tab import (experimental) =======================
+   Reconstructs a tab from a vector PDF export (tested against Ultimate Guitar's
+   "Official"/community exports) and hands the result to the alphaTex path above -
+   no separate parser needed. This only works because those PDFs draw fret numbers
+   as real positioned text and rhythm as glyphs from Leland, a public SMuFL font
+   with a documented codepoint registry (github.com/w3c/smufl); it can't do anything
+   useful with a scanned image or a font Ultimate Guitar swaps in later. Every
+   measurement below (string-line spacing, barline height) is auto-detected per
+   document rather than hardcoded, because two real UG exports we tested this
+   against turned out to use a 5x different internal scale for the same layout. */
+const PDFJS_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.min.mjs';
+const PDFJS_WORKER_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.worker.min.mjs';
+let PDFJS = null;
+async function loadPdfJs() {
+  if (!PDFJS) {
+    try { PDFJS = await import(PDFJS_URL); PDFJS.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL; }
+    catch { throw new UserError('The PDF reader didn’t load. Check your internet connection and try again.'); }
+  }
+  return PDFJS;
+}
+const PDF_DUR_GLYPH = { // SMuFL codepoints for eighth/sixteenth/32nd/64th note flags
+  0xe240: 8, 0xe241: 8, 0xe242: 16, 0xe243: 16, 0xe244: 32, 0xe245: 32, 0xe246: 64, 0xe247: 64,
+};
+function pdfComposeMatrix(m1, m2) { // m1 applied first, then m2
+  return [
+    m1[0] * m2[0] + m1[1] * m2[2], m1[0] * m2[1] + m1[1] * m2[3],
+    m1[2] * m2[0] + m1[3] * m2[2], m1[2] * m2[1] + m1[3] * m2[3],
+    m1[4] * m2[0] + m1[5] * m2[2] + m2[4], m1[4] * m2[1] + m1[5] * m2[3] + m2[5],
+  ];
+}
+function pdfApplyMatrix(x, y, m) { return [x * m[0] + y * m[2] + m[4], x * m[1] + y * m[3] + m[5]]; }
+// Vertical stroked lines (barlines) aren't exposed as a convenience list the way a
+// Python PDF library gives them - pdf.js only gives the raw drawing commands, so the
+// current transform matrix has to be tracked by hand through save/restore/transform.
+function pdfExtractVerticalLines(fnArray, argsArray, OPS) {
+  let ctm = [1, 0, 0, 1, 0, 0];
+  const stack = [];
+  const lines = [];
+  for (let i = 0; i < fnArray.length; i++) {
+    const fn = fnArray[i];
+    if (fn === OPS.save) stack.push(ctm);
+    else if (fn === OPS.restore) ctm = stack.pop() || [1, 0, 0, 1, 0, 0];
+    else if (fn === OPS.transform) ctm = pdfComposeMatrix(argsArray[i], ctm);
+    else if (fn === OPS.constructPath) {
+      const [subOps, coords] = argsArray[i];
+      let strokedSoon = false;
+      for (let j = i + 1; j < Math.min(i + 3, fnArray.length); j++) {
+        if (fnArray[j] === OPS.stroke) { strokedSoon = true; break; }
+        if (fnArray[j] === OPS.constructPath || fnArray[j] === OPS.fill) break;
+      }
+      if (subOps.length === 2 && subOps[0] === OPS.moveTo && subOps[1] === OPS.lineTo && coords.length === 4 && strokedSoon) {
+        const [x0, y0] = pdfApplyMatrix(coords[0], coords[1], ctm);
+        const [x1, y1] = pdfApplyMatrix(coords[2], coords[3], ctm);
+        if (Math.abs(x0 - x1) < 0.05) lines.push({ x: x0, yMin: Math.min(y0, y1), yMax: Math.max(y0, y1) });
+      }
+    }
+  }
+  return lines;
+}
+function pdfCluster(vals, tol) {
+  vals = vals.slice().sort((a, b) => a - b);
+  const groups = [];
+  for (const v of vals) {
+    if (groups.length && v - groups[groups.length - 1][groups[groups.length - 1].length - 1] < tol) groups[groups.length - 1].push(v);
+    else groups.push([v]);
+  }
+  return groups;
+}
+async function extractTabFromPdf(arrayBuffer) {
+  const pdfjsLib = await loadPdfJs();
+  let doc;
+  try { doc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise; }
+  catch { throw new UserError('That doesn’t look like a PDF Pickwork can open.'); }
+  const OPS = pdfjsLib.OPS;
+  const pages = [];
+  for (let p = 1; p <= doc.numPages; p++) {
+    const page = await doc.getPage(p);
+    const tc = await page.getTextContent();
+    const items = tc.items.map((it) => ({ str: it.str, x: it.transform[4], y: it.transform[5], size: it.transform[0] }));
+    const ol = await page.getOperatorList();
+    pages.push({ items, vlines: pdfExtractVerticalLines(ol.fnArray, ol.argsArray, OPS) });
+  }
+
+  // Fret numbers and rhythm glyphs are told apart by character class and Unicode
+  // range (digits/x for frets, the SMuFL Private Use Area for notation), not by font
+  // name - pdf.js only exposes an internal font id, not the font's real name.
+  const allDigitish = [];
+  pages.forEach((pg, pi) => pg.items.forEach((it) => { if (/^[0-9xX]{1,3}$/.test(it.str)) allDigitish.push({ ...it, pi }); }));
+  if (!allDigitish.length) throw new UserError('Pickwork couldn’t find a 6-string tab staff in that PDF.');
+  const sizeCounts = new Map();
+  allDigitish.forEach((it) => { const key = it.size.toFixed(1); sizeCounts.set(key, (sizeCounts.get(key) || 0) + 1); });
+  const fretSize = parseFloat([...sizeCounts.entries()].sort((a, b) => b[1] - a[1])[0][0]);
+  const fretDigits = allDigitish.filter((it) => Math.abs(it.size - fretSize) < 0.5);
+  const allGlyphs = [];
+  pages.forEach((pg, pi) => pg.items.forEach((it) => {
+    if (it.str.length === 1) {
+      const cp = it.str.codePointAt(0);
+      if (cp >= 0xE000 && cp <= 0xF8FF) allGlyphs.push({ x: it.x, y: it.y, code: cp, pi });
+    }
+  }));
+
+  // Per-document string-line spacing: the most common small gap between distinct
+  // fret-digit baselines. Not a fixed constant - real UG exports have used both a
+  // 7.5pt and (for the exact same layout) a 37.5pt version of this.
+  const gapCounts = new Map();
+  pages.forEach((pg, pi) => {
+    const ys = [...new Set(fretDigits.filter((d) => d.pi === pi).map((d) => Math.round(d.y * 10) / 10))].sort((a, b) => a - b);
+    for (let i = 0; i < ys.length - 1; i++) {
+      const g = Math.round((ys[i + 1] - ys[i]) * 10) / 10;
+      if (g >= 3 && g <= 60) gapCounts.set(g, (gapCounts.get(g) || 0) + 1);
+    }
+  });
+  const unit = gapCounts.size ? [...gapCounts.entries()].sort((a, b) => b[1] - a[1])[0][0] : 7.5;
+
+  // Real barlines share one fixed height across the whole document (the full 6-line
+  // staff), regardless of which individual strings happen to have notes in a given
+  // system - detecting that height globally, rather than from each system's own
+  // (possibly incomplete) set of used rows, is what lets a system whose top string(s)
+  // go unused still get matched to its real barlines instead of being dropped.
+  const heightCounts = new Map();
+  pages.forEach((pg) => pg.vlines.forEach((l) => {
+    const h = Math.round((l.yMax - l.yMin) / (unit * 0.1)) * unit * 0.1;
+    if (h > unit * 2) heightCounts.set(h, (heightCounts.get(h) || 0) + 1);
+  }));
+  const barlineHeight = heightCounts.size ? [...heightCounts.entries()].sort((a, b) => b[1] - a[1])[0][0] : unit * 5;
+
+  const measures = [];
+  pages.forEach((pg, pi) => {
+    const realBars = pg.vlines.filter((l) => Math.abs((l.yMax - l.yMin) - barlineHeight) < barlineHeight * 0.15);
+    // group barlines into per-staff-instance clusters by their shared yMax, so a wide
+    // matching window (needed when a system's top string(s) are unused) can't bleed
+    // barlines from one system into its neighbor.
+    const barGroups = pdfCluster(realBars.map((l) => l.yMax), unit * 0.5).map((g) => ({
+      yMax: g.reduce((a, b) => a + b, 0) / g.length,
+      xs: [...new Set(realBars.filter((l) => Math.abs(l.yMax - g[0]) < unit * 0.5).map((l) => Math.round(l.x * 10) / 10))].sort((a, b) => a - b),
+    }));
+
+    const digits = fretDigits.filter((d) => d.pi === pi).sort((a, b) => b.y - a.y); // descending y = top of page first
+    const systems = [];
+    digits.forEach((d) => {
+      const cur = systems[systems.length - 1];
+      if (cur && cur[cur.length - 1].y - d.y > unit * 3) systems.push([d]);
+      else if (systems.length) systems[systems.length - 1].push(d);
+      else systems.push([d]);
+    });
+    systems.forEach((sysDigits) => {
+      const rowYs = pdfCluster(sysDigits.map((d) => d.y), unit * 0.3).map((g) => g.reduce((a, b) => a + b, 0) / g.length);
+      rowYs.sort((a, b) => b - a);
+      const top0 = rowYs[0];
+      // top row = string 6 (high e) in Pickwork's own numbering, flipped to alphaTex's
+      // string-1-is-high-e convention down in the token-building step below.
+      const rowToString = (y) => 6 - Math.round((top0 - y) / unit);
+      const candidates = barGroups.filter((bg) => bg.yMax >= top0 - unit * 0.6 && bg.yMax < top0 + unit * 5.6);
+      if (!candidates.length) return;
+      candidates.sort((a, b) => Math.abs(a.yMax - top0) - Math.abs(b.yMax - top0));
+      const barsX = candidates[0].xs;
+      if (barsX.length < 2) return;
+      const sysGlyphs = allGlyphs.filter((g) => g.pi === pi && g.y > top0 - unit * 3 && g.y < top0 + unit * 6);
+
+      for (let bi = 0; bi < barsX.length - 1; bi++) {
+        const x0 = barsX[bi], x1 = barsX[bi + 1];
+        const m = { strings: new Map(), durs: [] };
+        sysDigits.forEach((d) => {
+          if (d.x >= x0 && d.x < x1) {
+            const sn = rowToString(d.y);
+            if (!m.strings.has(sn)) m.strings.set(sn, []);
+            m.strings.get(sn).push([d.x, d.str]);
+          }
+        });
+        sysGlyphs.forEach((g) => { if (g.x >= x0 && g.x < x1 && PDF_DUR_GLYPH[g.code]) m.durs.push([g.x, g.code]); });
+        if (m.strings.size) measures.push({ m, unit });
+      }
+    });
+  });
+  if (!measures.length) throw new UserError('Pickwork couldn’t find any playable notes in that PDF.');
+
+  const out = [];
+  measures.forEach(({ m, unit }) => {
+    const colTol = unit * 0.27, noteTol = unit * 0.33;
+    const xs = [...new Set([...m.strings.values()].flat().map(([x]) => Math.round(x * 10) / 10))];
+    const cols = pdfCluster(xs, colTol).map((g) => g.reduce((a, b) => a + b, 0) / g.length);
+    const beats = [];
+    cols.forEach((cx) => {
+      const notesHere = [];
+      m.strings.forEach((notes, sn) => {
+        notes.forEach(([x, fret]) => {
+          if (Math.abs(x - cx) < noteTol) {
+            // alphaTex numbers strings from the high e (string 1), the opposite of the
+            // top-row-first numbering used while walking the page above; it also wants
+            // lowercase 'x' for a muted string, not the 'X' UG prints.
+            const fretTok = fret === 'X' ? 'x' : fret;
+            notesHere.push(`${fretTok}.${7 - sn}`);
+          }
+        });
+      });
+      if (notesHere.length) {
+        let dur = 8, bestD = 999;
+        m.durs.forEach(([gx, code]) => {
+          const d = Math.abs(gx - cx);
+          if (d < bestD) { bestD = d; dur = PDF_DUR_GLYPH[code]; }
+        });
+        const tok = notesHere.length === 1 ? notesHere[0] : '(' + notesHere.join(' ') + ')';
+        beats.push(`${tok}.${dur}`);
+      }
+    });
+    if (beats.length) out.push(beats.join(' '));
+  });
+  return `\\tempo 100 .\n${out.join(' |\n')} |`;
 }
 function guitarTracks(score) {
   return score.tracks
@@ -2413,7 +2623,10 @@ $('#import-form').addEventListener('submit', async (e) => {
   btn.disabled = true; btn.textContent = 'Reading…';
   try {
     let item;
-    if (file && !/\.(tex|atex|txt)$/i.test(file.name)) {
+    if (file && /\.pdf$/i.test(file.name)) {
+      const alphatex = await extractTabFromPdf(await file.arrayBuffer());
+      item = { id: `imp-${Date.now()}`, fmt: 'tex', data: alphatex, name: file.name };
+    } else if (file && !/\.(tex|atex|txt)$/i.test(file.name)) {
       const bytes = new Uint8Array(await file.arrayBuffer());
       item = { id: `imp-${Date.now()}`, fmt: 'bytes', data: b64.from(bytes), name: file.name };
     } else {

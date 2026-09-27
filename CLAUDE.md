@@ -217,3 +217,41 @@ multiple first — verified against synthetic sine waves at each string's freque
 also plays its reference pitch via the existing `pluck()` synth. Reuses `ensureAudio()`/
 `ensureMic()` so it shares (not duplicates) mic permission and the audio context with
 the rest of the app.
+
+### In-app PDF tab import (experimental)
+"Import a tab" now accepts `.pdf` directly, no external script needed. `extractTabFromPdf()`
+(right after `loadAlphaTab()`) ports the same technique validated externally: reads fret
+numbers as positioned text and rhythm as Leland/SMuFL glyphs via pdf.js
+(`PDFJS_URL`/`PDFJS_WORKER_URL`, loaded lazily like alphaTab), reconstructs bars, and
+emits an alphaTex string that's handed to the *existing* `at.importer.ScoreLoader.
+loadAlphaTex()` path — no separate parser needed, a PDF just becomes another `fmt:'tex'`
+item.
+Porting from the Python/pdfplumber prototype to pdf.js surfaced real bugs pdfplumber had
+hidden by doing automatically, all fixed and cross-checked against two real UG PDFs
+before merging:
+- **Vector line coordinates need manual CTM tracking.** pdf.js's `getOperatorList()`
+  gives raw pre-transform path coordinates; pdfplumber applies the page's transform for
+  you. `pdfExtractVerticalLines()` walks `save`/`restore`/`transform` by hand
+  (`pdfComposeMatrix`/`pdfApplyMatrix`) — skipping this silently produces coordinates ~5x
+  off (or whatever the document's internal scale happens to be).
+- **Compare against the most recent row, not the system's first row**, when deciding
+  where one system ends and the next begins — comparing against the first row makes the
+  threshold effectively shrink as a system gets more rows, wrongly splitting a system
+  partway through (lost the bottom string entirely on one real file).
+- **Detect real barlines by a height shared across the whole document, not by counting
+  which rows have notes in one system.** A system whose top string(s) go unused has its
+  true staff-top sit higher than any note in it; deriving expected height from "rows with
+  digits" misses it. Cluster barlines by shared height first, globally, *then* match each
+  system to its nearest one-piece cluster (a wide match window without clustering first
+  lets barlines bleed between adjacent systems).
+- Font *name* isn't reliable in pdf.js (only an internal id is exposed) — tell fret
+  digits from rhythm glyphs by character class (`[0-9xX]` vs the SMuFL Private Use Area,
+  U+E000-U+F8FF) and dominant font size instead, which also sidesteps needing to resolve
+  pdf.js's internal font objects at all.
+Known residual gap: dense full-band passages (heavy muted-chord chugging) can still lose
+a handful of measures on complex real-world files — verified exactly matching a
+hand-checked reference on a clean fingerstyle piece, close-but-imperfect on a full 6-page
+rock arrangement. Rests and dotted notes aren't decoded (defaults to the nearest flag
+duration) — `PDF_DUR_GLYPH` only maps flag glyphs currently; the `restQuarter`/
+`augmentationDot` codepoints are known (see the SMuFL registry:
+github.com/w3c/smufl/tree/gh-pages/metadata) but not wired up.
