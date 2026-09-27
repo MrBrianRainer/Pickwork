@@ -62,6 +62,18 @@
   .flyer .by { margin: 0 0 14px; font-weight: 600; }
   .flyer .meta { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: .9rem; }
   .heat { color: #D8156A; letter-spacing: 2px; font-weight: 800; }
+  .flyer > .tag, .flyer h3 { margin-right: 56px; }
+  .flyer.imp > .tag, .flyer.imp h3 { margin-right: 92px; }
+  .stamp { position: absolute; right: 12px; top: 12px; width: 50px; height: 50px; border-radius: 50%; border: 3px solid #D8156A; color: #D8156A;
+    display: grid; place-content: center; text-align: center; font-family: 'Anton', Impact, sans-serif; font-size: 1.55rem; line-height: .85; transform: rotate(10deg); }
+  .stamp small { font-family: 'Archivo', sans-serif; font-weight: 800; font-size: .6rem; letter-spacing: .08em; }
+  .flyer.imp .stamp { right: 46px; }
+  .filters { display: grid; gap: 8px; }
+  .chips { display: flex; gap: 8px; overflow-x: auto; margin: 0 -18px; padding: 2px 18px 6px; scrollbar-width: none; }
+  .chips::-webkit-scrollbar { display: none; }
+  .chip { flex: 0 0 auto; border: 2px solid var(--line); background: var(--ink2); border-radius: 999px; padding: 7px 14px; font-weight: 800; font-size: .9rem; white-space: nowrap; }
+  .chip[aria-pressed="true"] { background: var(--yellow); color: var(--ink); border-color: var(--ink); box-shadow: 3px 3px 0 var(--pink); }
+  .shelf small { display: block; margin-top: 4px; font-family: 'Archivo', sans-serif; font-size: .9rem; font-weight: 600; color: var(--dim); }
   .best { font-weight: 800; }
   .flyer .del { position: absolute; right: 8px; top: 8px; width: 30px; height: 30px; border-radius: 50%; border: 0; background: var(--ink); color: var(--paper); font-weight: 800; }
   .actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 28px; }
@@ -194,10 +206,12 @@
   </div>
   <p class="tagline">Real guitar. Real notes. Your phone listens to every pluck, watches your picking hand, and keeps score.</p>
 
-  <h2 class="shelf">Tonight's setlist</h2>
-  <div class="songs" id="band-songs"></div>
-  <h2 class="shelf">Fingerstyle warm-ups</h2>
-  <div class="songs" id="songs"></div>
+  <div class="filters">
+    <div class="chips" id="genre-chips" role="group" aria-label="Filter by genre"></div>
+    <div class="chips" id="level-chips" role="group" aria-label="Filter by level"></div>
+  </div>
+  <div id="shelves"></div>
+  <p class="note" id="empty-note" hidden>No songs match those filters yet. <button type="button" class="chip" id="show-all">Show everything</button></p>
 
   <h2 class="shelf" id="yours-title" hidden>Your tabs</h2>
   <div class="songs" id="yours"></div>
@@ -398,6 +412,8 @@ const AT_URL = 'https://cdn.jsdelivr.net/npm/@coderline/alphatab@1.8.4/dist/alph
 class UserError extends Error {}
 
 /* ======================= Built-in songs ======================= */
+// Genre = setlist category (filter chip). Every built-in song needs one of these.
+const GENRES = ['Fingerstyle', 'Classic Rock', 'Modern Rock', 'Pop', 'Country & Folk', 'Ballad', 'Reggae', 'Punk'];
 const SHAPES = {
   G:  { frets: [3, 2, 0, 0, 0, 3],  fingers: [2, 1, 0, 0, 0, 3] },
   C:  { frets: [-1, 3, 2, 0, 1, 0], fingers: [0, 3, 2, 0, 1, 0] },
@@ -410,6 +426,16 @@ const SHAPES = {
   A5: { frets: [-1, 0, 2, -1, -1, -1], fingers: [0, 0, 1, 0, 0, 0] },
   C5: { frets: [-1, 3, 5, -1, -1, -1], fingers: [0, 1, 3, 0, 0, 0] },
   D5: { frets: [-1, -1, 0, 2, -1, -1], fingers: [0, 0, 0, 1, 0, 0] },
+  B5: { frets: [-1, 2, 4, -1, -1, -1], fingers: [0, 1, 3, 0, 0, 0] },
+  A:  { frets: [-1, 0, 2, 2, 2, 0],  fingers: [0, 0, 1, 2, 3, 0] },
+  E:  { frets: [0, 2, 2, 1, 0, 0],   fingers: [0, 2, 3, 1, 0, 0] },
+  Dm: { frets: [-1, -1, 0, 2, 3, 1], fingers: [0, 0, 0, 2, 3, 1] },
+  Bm: { frets: [-1, 2, 4, 4, 3, 2],  fingers: [0, 1, 3, 4, 2, 1] },
+  E7: { frets: [0, 2, 0, 1, 3, 0],   fingers: [0, 2, 0, 1, 4, 0] },
+  A7: { frets: [-1, 0, 2, 0, 2, 0],  fingers: [0, 0, 2, 0, 3, 0] },
+  D7: { frets: [-1, -1, 0, 2, 1, 2], fingers: [0, 0, 0, 2, 1, 3] },
+  G7: { frets: [3, 2, 0, 0, 0, 1],   fingers: [3, 2, 0, 0, 0, 1] },
+  B7: { frets: [-1, 2, 1, 2, 0, 2],  fingers: [0, 2, 1, 3, 0, 4] },
 };
 function tok(t) {
   const m = /^([pima])?([1-6]):(\d+)$/.exec(t.trim());
@@ -417,7 +443,8 @@ function tok(t) {
   const s = +m[2], f = +m[3];
   return { s, f, finger: m[1] || null, midi: TUNING[s - 1] + f };
 }
-function built({ id, title, artist, bpm, ts = [4, 4], sub, bars, part = 'pluck', style = '' }) {
+function built({ id, title, artist, bpm, ts = [4, 4], sub, bars, part = 'pluck', style = '', genre }) {
+  if (!GENRES.includes(genre)) throw new Error(`Song ${id} needs a genre from GENRES`);
   const beatT = (TPQ * 4) / ts[1], barT = beatT * ts[0], slotT = beatT / sub;
   const groups = [], chords = [], barList = [];
   let harm = null;
@@ -430,7 +457,7 @@ function built({ id, title, artist, bpm, ts = [4, 4], sub, bars, part = 'pluck',
     bar.seq.forEach((slot, k) => { if (slot) groups.push({ tick: base + k * slotT, notes: slot.split('+').map(tok) }); });
   });
   const backing = genBacking(bars, ts);
-  return { id, title, artist, style, part, source: 'builtin', groups, chords, backing, band: backing.length > 0, bars: barList, tempo: [{ tick: 0, bpm }], endTick: bars.length * barT };
+  return { id, title, artist, style, genre, part, source: 'builtin', groups, chords, backing, band: backing.length > 0, bars: barList, tempo: [{ tick: 0, bpm }], endTick: bars.length * barT };
 }
 
 /* ----- Backing band generator for built-in songs ----- */
@@ -458,6 +485,8 @@ function genBacking(bars, ts) {
     if (d === 'four') { [0, 4, 8, 12].forEach((k) => hit(k, 'kick')); hit(4, 'clap'); hit(12, 'clap'); [2, 6, 10, 14].forEach((k) => hit(k, 'ohat', 0.55)); for (let k = 0; k < 16; k++) if (k % 2 === 0) hit(k, 'hat', 0.35); }
     if (d === 'half') { hit(0, 'kick'); hit(6, 'kick', 0.6); hit(8, 'snare', 0.8); [0, 4, 8, 12].forEach((k) => hit(k, 'hat', 0.5)); }
     if (d === 'boogie') { hit(0, 'kick'); hit(8, 'kick'); hit(4, 'snare'); hit(12, 'snare'); for (let k = 0; k < 16; k += 2) hit(k, 'ride', k % 4 ? 0.6 : 0.9); }
+    if (d === 'onedrop') { hit(8, 'kick'); hit(8, 'snare', 0.55); for (let k = 0; k < 16; k += 2) hit(k, 'hat', k % 4 ? 0.55 : 0.35); hit(15, 'hat', 0.4); }
+    if (d === 'punk') { [0, 4, 8, 12].forEach((k) => hit(k, 'kick', 0.9)); [2, 6, 10, 14].forEach((k) => hit(k, 'snare', 0.75)); for (let k = 0; k < 16; k += 2) hit(k, 'hat', 0.6); }
     if (d === 'end') hit(0, 'kick');
     if (B.crash || d === 'end') hit(0, 'crash');
     if (B.fill) { [12, 13, 14].forEach((k) => hit(k, 'snare', 0.7)); hit(15, 'tom', 0.9); }
@@ -468,6 +497,8 @@ function genBacking(bars, ts) {
     if (B.b === 'half') { tone(0, 'bass', [r], 7.5); tone(8, 'bass', [r], 7.5); }
     if (B.b === 'whole') tone(0, 'bass', [r], 15.5);
     if (B.b === 'hit') tone(0, 'bass', [r], 10);
+    if (B.b === 'alt') { tone(0, 'bass', [r], 7); tone(8, 'bass', [r + 7], 7); }
+    if (B.b === 'dub') [[0, 0, 3], [6, 7, 1.5], [8, 0, 3], [12, h.minor ? 3 : 4, 1.5], [14, 7, 1.5]].forEach(([k, iv, len]) => tone(k, 'bass', [r + iv], len));
     if (B.k === 'pad') tone(0, 'pad', voicing(h), 16, 1);
     if (B.k === 'organ') { [2, 6, 10, 14].forEach((k) => tone(k, 'organ', voicing(h), 1.2)); }
     const pr = powerRoot(h.pc), power = [pr, pr + 7, pr + 12];
@@ -475,6 +506,7 @@ function genBacking(bars, ts) {
     if (B.g === 'ring') tone(0, 'dist', power, 16);
     if (B.g === 'push') [0, 6, 12].forEach((k, i) => tone(k, 'dist', power, i === 2 ? 4 : 6));
     if (B.g === 'hit') tone(0, 'dist', power, 12);
+    if (B.g === 'skank') [4, 12].forEach((k) => tone(k, 'dist', voicing(h), 1, 0.8, true));
   });
   return ev.sort((a, b) => a.tick - b.tick);
 }
@@ -498,7 +530,7 @@ const TRAVIS = {
 const rest7 = [null, null, null, null, null, null, null];
 
 const BUILTINS = [
-  built({ id: 'warmup', title: 'Open String Stomp', artist: 'Pickwork original', bpm: 72, sub: 1, bars: [
+  built({ id: 'warmup', title: 'Open String Stomp', artist: 'Pickwork original', genre: 'Fingerstyle', style: 'Open-string patterns', bpm: 72, sub: 1, bars: [
     { seq: ['p1:0', 'p2:0', 'p3:0', 'i4:0'] },
     { seq: ['m5:0', 'a6:0', 'm5:0', 'i4:0'] },
     { seq: ['p3:0', 'p2:0', 'p1:0', null] },
@@ -506,27 +538,28 @@ const BUILTINS = [
     { seq: ['p3:0', 'a6:0', 'i4:0', 'm5:0'] },
     { seq: ['p1:0+a6:0', null, null, null] },
   ] }),
-  alternate(built({ id: 'ode', title: 'Ode to Joy', artist: 'Ludwig van Beethoven', bpm: 96, sub: 2, bars: [
+  alternate(built({ id: 'ode', title: 'Ode to Joy', artist: 'Ludwig van Beethoven', genre: 'Fingerstyle', style: 'Classical melody', bpm: 96, sub: 2, bars: [
     { seq: q(E4, E4, F4, G4) }, { seq: q(G4, F4, E4, D4) }, { seq: q(C4, C4, D4, E4) },
     { seq: [E4, null, null, D4, D4, null, null, null] },
     { seq: q(E4, E4, F4, G4) }, { seq: q(G4, F4, E4, D4) }, { seq: q(C4, C4, D4, E4) },
     { seq: [D4, null, null, C4, C4, null, null, null] },
   ] })),
-  built({ id: 'romance', title: 'Romance (opening)', artist: 'Anonymous, 19th century', bpm: 60, ts: [3, 4], sub: 3, bars: [
+  built({ id: 'romance', title: 'Romance (opening)', artist: 'Anonymous, 19th century', genre: 'Fingerstyle', style: 'Classical arpeggio', bpm: 60, ts: [3, 4], sub: 3, bars: [
     romanceBar([7, 7, 7], true), romanceBar([7, 5, 3]), romanceBar([3, 2, 0]), romanceBar([0, 3, 7]),
     romanceBar([7, 7, 7]), romanceBar([7, 5, 3]), romanceBar([3, 2, 0]), romanceBar([0, 3, 7]),
     { seq: ['p1:0+a6:0', null, null, null, null, null, null, null, null] },
   ] }),
-  built({ id: 'campfire', title: 'Campfire Changes', artist: 'Pickwork original', bpm: 72, sub: 2, bars: [
+  built({ id: 'campfire', title: 'Campfire Changes', artist: 'Pickwork original', genre: 'Fingerstyle', style: 'Chord arpeggios', bpm: 72, sub: 2, bars: [
     campBar('G'), campBar('C'), campBar('G'), campBar('D'), campBar('Em'), campBar('C'), campBar('D'),
     { ch: 'G', seq: ['p1:3+i4:0+m5:0+a6:3', ...rest7] },
   ] }),
-  built({ id: 'travis', title: 'Travis Walk', artist: 'Pickwork original', bpm: 76, sub: 2, bars: [
+  built({ id: 'travis', title: 'Travis Walk', artist: 'Pickwork original', genre: 'Fingerstyle', style: 'Travis picking', bpm: 76, sub: 2, bars: [
     { ch: 'C', seq: TRAVIS.C }, { seq: TRAVIS.C }, { ch: 'G', seq: TRAVIS.G }, { seq: TRAVIS.G },
     { ch: 'C', seq: TRAVIS.C }, { seq: TRAVIS.C }, { ch: 'G', seq: TRAVIS.G },
     { ch: 'C', seq: ['p2:3+i5:1+m6:0', ...rest7] },
   ] }),
   ...bandSongs(),
+  ...moreSongs(),
 ];
 
 function bandSongs() {
@@ -542,14 +575,14 @@ function bandSongs() {
   const cho = (ch, extra = {}) => ({ seq: push3(PC[ch]), ch, band: { d: 'rock', b: 'eighths', g: 'push', k: 'pad', ...extra } });
   const verseGH = [{ ...riff(GH_A, { crash: true }), ch: 'E5' }, riff(GH_B), riff(GH_A), riff(GH_B, { fill: true })];
   const chorusGH = [cho('G5', { crash: true }), cho('A5'), cho('E5'), cho('D5', { fill: true })];
-  const gasoline = built({ id: 'gasoline', title: 'Gasoline Halo', artist: 'Pickwork original', style: 'Classic rock', part: 'dist', bpm: 116, sub: 2,
+  const gasoline = built({ id: 'gasoline', title: 'Gasoline Halo', artist: 'Pickwork original', genre: 'Classic Rock', style: 'Pentatonic riff', part: 'dist', bpm: 116, sub: 2,
     bars: [...verseGH, ...chorusGH, ...verseGH, ...chorusGH, end(PC.E5, 'E5')] });
 
   // 2. Classic rock: 12-bar boogie in A
   const boog = (lo, fr) => { const a = `${lo}+${fr}2`, b = `${lo}+${fr}4`; return [a, a, b, b, a, a, b, b]; };
   const BG = { A5: boog('2:0', '3:'), D5: boog('3:0', '4:'), E5: boog('1:0', '2:') };
   const bb = (ch, extra = {}) => ({ seq: BG[ch], ch, harm: ch[0], band: { d: 'boogie', b: 'boogie', k: 'organ', ...extra } });
-  const rustbelt = built({ id: 'rustbelt', title: 'Rust Belt Boogie', artist: 'Pickwork original', style: 'Classic rock', part: 'dist', bpm: 138, sub: 2,
+  const rustbelt = built({ id: 'rustbelt', title: 'Rust Belt Boogie', artist: 'Pickwork original', genre: 'Classic Rock', style: '12-bar boogie', part: 'dist', bpm: 138, sub: 2,
     bars: [bb('A5', { crash: true }), bb('A5'), bb('A5'), bb('A5'), bb('D5', { crash: true }), bb('D5'), bb('A5'), bb('A5'),
       bb('E5', { crash: true }), bb('D5'), bb('A5'), bb('E5', { fill: true }), end('2:0+3:2', 'A5', 'A')] });
 
@@ -559,7 +592,7 @@ function bandSongs() {
   const chug = (seq, extra = {}) => ({ seq, harm: 'E5', band: { d: 'drive', b: 'eighths', g: 'chug', ...extra } });
   const big = (ch, extra = {}) => ({ seq: q4(PC[ch]), ch, band: { d: 'drive', b: 'eighths', g: 'ring', k: 'pad', ...extra } });
   const chorusSB = (fill) => [big('C5', { crash: true }), big('G5'), big('D5'), big('E5', { fill })];
-  const staticBloom = built({ id: 'static', title: 'Static Bloom', artist: 'Pickwork original', style: 'Modern rock', part: 'dist', bpm: 144, sub: 2,
+  const staticBloom = built({ id: 'static', title: 'Static Bloom', artist: 'Pickwork original', genre: 'Modern Rock', style: 'Palm-muted chug', part: 'dist', bpm: 144, sub: 2,
     bars: [{ ...chug(SB1, { crash: true }), ch: 'E5' }, chug(SB2), chug(SB1), chug(SB2, { fill: true }), ...chorusSB(false), ...chorusSB(true),
       { ...chug(SB1, { crash: true }), ch: 'E5' }, chug(SB2, { fill: true }), end(PC.E5, 'E5')] });
 
@@ -568,7 +601,7 @@ function bandSongs() {
   const PLC = { Em: ['1:0', 0, 0, 0], C: ['2:3', 0, 1, 0], G: ['1:3', 0, 0, 3], D: ['3:0', 2, 3, 2] };
   const lan = (ch, band) => ({ seq: pl(...PLC[ch]), ch, band });
   const run = (band, crashFirst, fillLast) => ['Em', 'C', 'G', 'D'].map((ch, i) => lan(ch, { ...band, crash: crashFirst && i === 0, fill: fillLast && i === 3 }));
-  const lanterns = built({ id: 'lanterns', title: 'Paper Lanterns', artist: 'Pickwork original', style: 'Modern rock', bpm: 96, sub: 2,
+  const lanterns = built({ id: 'lanterns', title: 'Paper Lanterns', artist: 'Pickwork original', genre: 'Modern Rock', style: 'Fingerpicked build', bpm: 96, sub: 2,
     bars: [...run({ b: 'whole', k: 'pad' }, false, false), ...run({ d: 'half', b: 'half', k: 'pad' }, true, true),
       ...run({ d: 'rock', b: 'eighths', k: 'pad' }, true, true), end('p1:0+i4:0+m5:0+a6:0', 'Em', 'Em')] });
 
@@ -584,7 +617,7 @@ function bandSongs() {
   const popB = (extra = {}) => ({ d: 'four', b: 'pop', k: 'pad', ...extra });
   const prog = ['C', 'G', 'Am', 'F'];
   const hook = (last) => prog.map((ch, i) => ({ seq: i === 3 ? H[last] : H[i], ch, band: popB({ crash: i === 0 }) }));
-  const neon = built({ id: 'neon', title: 'Neon Heartline', artist: 'Pickwork original', style: 'Pop', bpm: 112, sub: 2,
+  const neon = built({ id: 'neon', title: 'Neon Heartline', artist: 'Pickwork original', genre: 'Pop', style: 'Synth-pop hook', bpm: 112, sub: 2,
     bars: [{ seq: Array(8).fill(null), ch: 'C', band: { b: 'pop', k: 'pad' } }, { seq: Array(8).fill(null), ch: 'G', band: { b: 'pop', k: 'pad', fill: true } },
       ...hook(3), ...hook(4), ...prog.map((ch, i) => ({ seq: push3(PCH[ch]), ch, band: popB({ crash: i === 0, fill: i === 3 }) })),
       end(PCH.C, 'C', 'C')] });
@@ -592,12 +625,154 @@ function bandSongs() {
   return [gasoline, rustbelt, staticBloom, lanterns, neon];
 }
 
+// Second batch: all original compositions. Chord shapes and harmony only; no real songs transcribed.
+function moreSongs() {
+  const R = (n) => Array(n).fill(null);
+  // Drop a bar's chord card when it repeats the previous bar's chord (harmony carries over anyway).
+  const once = (bars) => { let prev; return bars.map((b) => { if (!b.ch) return b; if (b.ch === prev) { const { ch, ...rest } = b; return rest; } prev = b.ch; return b; }); };
+  const PC = { E5: '1:0+2:2', G5: '1:3+2:5', A5: '2:0+3:2', D5: '3:0+4:2', B5: '2:2+3:4' };
+  const TRI = { G: '4:0+5:0+6:3', C: '4:0+5:1+6:0', D: '4:2+5:3+6:2', A: '4:2+5:2+6:0', Bm: '4:4+5:3+6:2', Am: '4:2+5:1+6:0', Em: '4:0+5:0+6:0' };
+  const O = 'Pickwork original';
+
+  /* ---- Fingerstyle ---- */
+  // Easier than Open String Stomp: half notes, thumb only, then one finger per string.
+  const firstLight = built({ id: 'firstlight', title: 'First Light', artist: O, genre: 'Fingerstyle', style: 'Open strings, slow', bpm: 60, sub: 1, bars: [
+    { seq: ['p1:0', null, 'p2:0', null] }, { seq: ['p3:0', null, 'p2:0', null] },
+    { seq: ['p1:0', null, 'p2:0', null] }, { seq: ['p3:0', null, null, null] },
+    { seq: ['i4:0', null, 'm5:0', null] }, { seq: ['a6:0', null, 'm5:0', null] },
+    { seq: ['i4:0', null, 'm5:0', null] }, { seq: ['p1:0', null, null, null] },
+  ] });
+
+  // Top three strings only, waltz time, two fretted notes.
+  const lullaby = built({ id: 'lullaby', title: 'Three String Lullaby', artist: O, genre: 'Fingerstyle', style: 'Treble-string waltz', bpm: 66, ts: [3, 4], sub: 1, bars: [
+    { seq: ['i4:0', 'm5:0', 'a6:0'] }, { seq: ['a6:0', 'm5:0', 'i4:0'] }, { seq: ['i4:0', 'm5:1', 'a6:0'] }, { seq: ['m5:0', null, null] },
+    { seq: ['i4:0', 'm5:0', 'a6:3'] }, { seq: ['a6:0', 'm5:1', 'm5:0'] }, { seq: ['i4:0', 'm5:0', 'a6:0'] }, { seq: ['a6:0', null, null] },
+  ] });
+
+  // Pinch on beat one, alternating bass on three.
+  const PS = { G: ['1:3', '3:0', 0, 0, 3], Em: ['1:0', '3:2', 0, 0, 0], C: ['2:3', '3:2', 0, 1, 0], D: ['3:0', '2:0', 2, 3, 2] };
+  const swing = (ch) => { const [b, alt, g, bb, e] = PS[ch]; return { ch, seq: [`p${b}+a6:${e}`, null, `i4:${g}`, null, `p${alt}`, null, `m5:${bb}`, null] }; };
+  const porch = built({ id: 'porch', title: 'Porch Swing', artist: O, genre: 'Fingerstyle', style: 'Thumb and pinch', bpm: 80, sub: 2,
+    bars: once([...['G', 'G', 'Em', 'Em', 'C', 'C', 'D', 'D', 'G', 'Em', 'C', 'D'].map(swing), { ch: 'G', seq: ['p1:3+a6:3', ...R(7)] }]) });
+
+  // Harder than Romance: sixteenth-note p-i-m-a arpeggios through minor-key changes.
+  const CS = { Am: ['2:0', '3:2', 2, 1, 0], Dm: ['3:0', '2:0', 2, 3, 1], E: ['1:0', '2:2', 1, 0, 0], F: ['3:3', '2:3', 2, 1, 1],
+    G: ['1:3', '3:0', 0, 0, 3], C: ['2:3', '3:2', 0, 1, 0], E7: ['1:0', '2:2', 1, 3, 0], B7: ['2:2', '1:2', 2, 0, 2] };
+  const casc = (ch) => {
+    const [b, alt, g, bb, e] = CS[ch];
+    const half = (bass) => [`p${bass}`, `i4:${g}`, `m5:${bb}`, `a6:${e}`, `m5:${bb}`, `i4:${g}`, `m5:${bb}`, `i4:${g}`];
+    return { ch, seq: [...half(b), ...half(alt)] };
+  };
+  const cascade = built({ id: 'cascade', title: 'Cascade Etude', artist: O, genre: 'Fingerstyle', style: 'Sixteenth-note arpeggios', bpm: 84, sub: 4,
+    bars: once([...['Am', 'Dm', 'E', 'Am', 'F', 'G', 'C', 'E7', 'Am', 'Dm', 'B7', 'E', 'F', 'E7', 'Am'].map(casc), { ch: 'Am', seq: ['p2:0+a6:0', ...R(15)] }]) });
+
+  // Harder than Travis Walk: steady alternating thumb with a syncopated melody on top, ragtime changes.
+  const RT = { C: ['2:3', '4:0', '3:2', '4:0'], A7: ['2:0', '4:0', '3:2', '4:0'], D7: ['3:0', '4:2', '2:0', '4:2'], G7: ['1:3', '4:0', '3:0', '4:0'] };
+  const rag = (ch, mel, pinch) => ({ ch, seq: RT[ch].flatMap((t, k) => [`p${t}${k === 0 && pinch ? `+${pinch}` : ''}`, mel[k] || null]) });
+  const railyard = built({ id: 'railyard', title: 'Rail Yard Rag', artist: O, genre: 'Fingerstyle', style: 'Ragtime Travis picking', bpm: 126, sub: 2, bars: once([
+    rag('C', ['m5:1', 'a6:0', 'a6:3', 'm5:1']), rag('C', ['a6:0', 'm5:1', 'a6:0', null], 'a6:3'),
+    rag('A7', ['m5:2', 'a6:0', 'a6:3', 'a6:0']), rag('A7', ['m5:2', 'a6:0', 'm5:2', null], 'a6:3'),
+    rag('D7', ['a6:2', 'm5:1', 'a6:2', 'm5:3']), rag('D7', ['m5:1', 'a6:2', 'm5:1', null], 'a6:2'),
+    rag('G7', ['m5:0', 'a6:1', 'm5:3', 'a6:1']), rag('G7', ['m5:0', 'a6:1', 'm5:0', null], 'a6:1'),
+    rag('C', ['m5:1', 'a6:0', 'a6:3', 'm5:1']), rag('A7', ['m5:2', 'a6:0', 'a6:3', 'a6:0']),
+    rag('D7', ['a6:2', 'm5:1', 'a6:2', 'm5:3']), rag('G7', ['m5:0', 'a6:1', 'm5:3', 'a6:1']),
+    { ch: 'C', seq: ['p2:3+m5:1+a6:0', ...R(7)] },
+  ]) });
+
+  /* ---- Classic rock: the easiest band song ---- */
+  const bandEnd = (notes, slots, harm, extra = {}) => ({ seq: [notes, ...R(slots - 1)], ch: harm, harm, band: { d: 'end', b: 'hit', g: 'hit', ...extra } });
+  const whole = (ch, extra = {}) => ({ ch, seq: [PC[ch], null, null, null], band: { d: 'rock', b: 'half', g: 'ring', ...extra } });
+  const halves = (ch, extra = {}) => ({ ch, seq: [PC[ch], null, PC[ch], null], band: { d: 'rock', b: 'eighths', g: 'ring', k: 'organ', ...extra } });
+  const firstGig = built({ id: 'firstgig', title: 'First Gig Jitters', artist: O, genre: 'Classic Rock', style: 'Big power chords', part: 'dist', bpm: 88, sub: 1, bars: once([
+    whole('E5', { crash: true }), whole('A5'), whole('E5'), whole('A5', { fill: true }),
+    whole('D5', { crash: true }), whole('A5'), whole('E5'), whole('E5', { fill: true }),
+    halves('G5', { crash: true }), halves('A5'), halves('E5'), halves('D5', { fill: true }),
+    halves('G5', { crash: true }), halves('A5'), halves('E5'), halves('E5', { fill: true }),
+    bandEnd(PC.E5, 4, 'E5'),
+  ]) });
+
+  /* ---- Country & Folk ---- */
+  // Boom-chuck: bass note, strum, alternate bass, strum.
+  const DR = { G: ['1:3', '3:0'], C: ['2:3', '1:3'], D: ['3:0', '2:0'] };
+  const two = (ch, extra = {}) => ({ ch, seq: [DR[ch][0], TRI[ch], DR[ch][1], TRI[ch]], band: { d: 'boogie', b: 'alt', ...extra } });
+  const dustRoad = built({ id: 'dustroad', title: 'Dust Road Two-Step', artist: O, genre: 'Country & Folk', style: 'Boom-chuck', bpm: 104, sub: 1, bars: once([
+    two('G', { crash: true }), two('G'), two('C'), two('G'), two('G'), two('G'), two('D'), two('D', { fill: true }),
+    two('G', { crash: true }), two('G'), two('C'), two('C'), two('G'), two('D'), two('G'), two('G', { fill: true }),
+    bandEnd(`1:3+${TRI.G}`, 4, 'G', { g: undefined }),
+  ]) });
+
+  // Folk-rock strum: sparse in the verse, full down-up rhythm in the chorus.
+  const verseStrum = (ch, extra = {}) => ({ ch, seq: [TRI[ch], null, null, null, TRI[ch], null, TRI[ch], null], band: { d: 'half', b: 'half', k: 'organ', ...extra } });
+  const fullStrum = (ch, extra = {}) => ({ ch, seq: [TRI[ch], null, TRI[ch], TRI[ch], null, TRI[ch], TRI[ch], null], band: { d: 'rock', b: 'eighths', k: 'organ', g: 'ring', ...extra } });
+  const millTown = built({ id: 'milltown', title: 'Mill Town Anthem', artist: O, genre: 'Country & Folk', style: 'Folk-rock strum', bpm: 120, sub: 2, bars: once([
+    verseStrum('D'), verseStrum('A'), verseStrum('Bm'), verseStrum('G'),
+    verseStrum('D'), verseStrum('A'), verseStrum('Bm'), verseStrum('G', { fill: true }),
+    fullStrum('G', { crash: true }), fullStrum('A'), fullStrum('D'), fullStrum('Bm'),
+    fullStrum('G'), fullStrum('A'), fullStrum('D'), fullStrum('D', { fill: true }),
+    bandEnd(TRI.D, 8, 'D', { g: 'hit' }),
+  ]) });
+
+  /* ---- Ballad ---- */
+  const LT = { C: ['2:3', 0, 1, 0], Am: ['2:0', 2, 1, 0], F: ['3:3', 2, 1, 1], G: ['1:3', 0, 0, 3] };
+  const tide = (ch, band) => { const [b, g, bb, e] = LT[ch]; return { ch, band, seq: [`p${b}`, null, `i4:${g}`, `m5:${bb}`, `a6:${e}`, null, `m5:${bb}`, null] }; };
+  const tideRun = (band, fillLast) => ['C', 'Am', 'F', 'G'].map((ch, i) => tide(ch, { ...band, crash: band.d && i === 0, fill: fillLast && i === 3 }));
+  const lowTide = built({ id: 'lowtide', title: 'Low Tide Letters', artist: O, genre: 'Ballad', style: 'Slow arpeggio ballad', bpm: 66, sub: 2, bars: [
+    ...tideRun({ b: 'whole', k: 'pad' }, false), ...tideRun({ d: 'half', b: 'half', k: 'pad' }, true), ...tideRun({ d: 'half', b: 'half', k: 'pad' }, true),
+    { ch: 'C', seq: ['p2:3+i4:0+m5:1+a6:0', ...R(7)], band: { d: 'end', b: 'hit', k: 'pad' } },
+  ] });
+
+  /* ---- Reggae ---- */
+  // Verse: chord skank on beats 2 and 4. Chorus: syncopated melody on the off-beats while the band skanks.
+  const skank = (ch, extra = {}) => ({ ch, seq: [null, null, TRI[ch], null, null, null, TRI[ch], null], band: { d: 'onedrop', b: 'dub', k: 'organ', ...extra } });
+  const TUNE = {
+    C: [null, '6:0', null, '6:3', null, '5:1', null, '6:0'],
+    G: [null, '5:3', null, '5:0', null, '6:3', null, null],
+    Am: [null, '6:0', null, '5:1', null, '6:5', null, '6:0'],
+    D: [null, '6:2', null, '5:3', null, '6:2', null, null],
+  };
+  const riddim = (ch, extra = {}) => ({ ch, seq: TUNE[ch], band: { d: 'onedrop', b: 'dub', k: 'organ', g: 'skank', ...extra } });
+  const tinRoof = built({ id: 'tinroof', title: 'Tin Roof Riddim', artist: O, genre: 'Reggae', style: 'One-drop skank', bpm: 76, sub: 2, bars: [
+    skank('Am', { crash: true }), skank('D'), skank('Am'), skank('D', { fill: true }),
+    riddim('C', { crash: true }), riddim('G'), riddim('Am'), riddim('D'), riddim('C'), riddim('G'), riddim('Am'), riddim('D', { fill: true }),
+    skank('Am', { crash: true }), skank('D'), skank('Am'), skank('D', { fill: true }),
+    { ch: 'Am', seq: [TRI.Am, ...R(7)], band: { d: 'end', b: 'hit', k: 'pad' } },
+  ] });
+
+  /* ---- Punk ---- */
+  const down = (ch, extra = {}) => ({ ch, seq: R(8).fill(PC[ch]), band: { d: 'punk', b: 'eighths', g: 'chug', ...extra } });
+  const verseR = (fill) => [down('E5', { crash: true }), down('E5'), down('A5'), down('B5', { fill })];
+  const chorusR = (fill) => [down('D5', { crash: true }), down('A5'), down('E5'), down('B5', { fill })];
+  const riot = built({ id: 'riot', title: 'Three Chord Riot', artist: O, genre: 'Punk', style: 'Nonstop downstrokes', part: 'dist', bpm: 180, sub: 2,
+    bars: once([...verseR(false), ...verseR(true), ...chorusR(false), ...chorusR(true), ...verseR(true), ...chorusR(true), bandEnd(PC.E5, 8, 'E5')]) });
+
+  /* ---- Pop ---- */
+  const HOOK = {
+    G: ['6:3', null, '5:3', '6:3', null, '5:0', null, '5:3'],
+    D: ['6:2', null, '5:3', null, '6:2', '5:3', null, null],
+    Em: ['6:0', null, '5:0', '6:0', null, '5:0', '4:0', null],
+    C: ['5:1', null, '6:0', null, '5:1', '6:3', null, null],
+  };
+  const pp = (extra = {}) => ({ d: 'four', b: 'pop', k: 'pad', ...extra });
+  const popProg = ['G', 'D', 'Em', 'C'];
+  const hookRun = () => popProg.map((ch, i) => ({ ch, seq: HOOK[ch], band: pp({ crash: i === 0, fill: i === 3 }) }));
+  const stab = (ch) => [TRI[ch], null, null, TRI[ch], null, null, TRI[ch], null];
+  const polaroid = built({ id: 'polaroid', title: 'Polaroid Summer', artist: O, genre: 'Pop', style: 'Bright pop riff', bpm: 104, sub: 2, bars: [
+    { ch: 'G', seq: R(8), band: { b: 'pop', k: 'pad' } }, { ch: 'D', seq: R(8), band: { b: 'pop', k: 'pad', fill: true } },
+    ...hookRun(), ...hookRun(),
+    ...popProg.map((ch, i) => ({ ch, seq: stab(ch), band: pp({ crash: i === 0, fill: i === 3 }) })),
+    ...hookRun(),
+    { ch: 'G', seq: [TRI.G, ...R(7)], band: { d: 'end', b: 'hit', k: 'pad' } },
+  ] });
+
+  return [firstLight, lullaby, porch, cascade, railyard, firstGig, dustRoad, millTown, lowTide, tinRoof, riot, polaroid];
+}
+
 /* ======================= Storage ======================= */
 const KEY = 'pickwork.v2';
 function load() { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } }
 const saved = load();
 const settings = Object.assign({ noteSpeed: 'normal', strict: false, pickSide: 'right', sensitivity: 1, clickVol: 0.6, bandVol: 0.7, latencyMs: 0 }, saved.settings || {});
-const setupPrefs = Object.assign({ mode: 'rock', diff: 'club', speed: 100, click: true, cam: false, band: true }, saved.setup || {});
+const setupPrefs = Object.assign({ mode: 'rock', diff: 'club', speed: 100, click: true, cam: false, band: true, genre: '', level: 0 }, saved.setup || {});
 let bests = saved.bests || {};
 let imports = saved.imports || [];
 function persist() {
@@ -659,6 +834,40 @@ function heat(song) {
   const rate = song.groups.length / sec;
   return rate < 1.3 ? 1 : rate < 2.4 ? 2 : 3;
 }
+
+/* ----- Song level (inherent difficulty, 1-5) -----
+   Measured on the full Arena note set at 100% speed, so it's a property of the song,
+   independent of the Garage/Club/Arena knob. One point is roughly "one more note per second":
+     notes per second
+   + 0.5 × average string jump between consecutive notes (string-crossing)
+   + 0.5 × chord changes per bar (fretting-hand changes)
+   + 0.15 × frets above 5 at the highest note (position shifts and reach)
+   The score maps to a level through LEVEL_CUTS. Imports get a level the same way. */
+const LEVELS = [
+  { name: 'Open Mic', blurb: 'Slow and roomy. One string at a time, mostly open.' },
+  { name: 'Coffee House', blurb: 'Steady tempos and a few easy shapes.' },
+  { name: 'Bar Band', blurb: 'Busier picking and regular chord changes.' },
+  { name: 'Opening Act', blurb: 'Quick riffs and string-crossing that keep coming.' },
+  { name: 'Headliner', blurb: 'Full speed, dense picking, big reaches.' },
+];
+const LEVEL_CUTS = [2, 3, 4, 5];
+function songScore(song) {
+  const sec = Math.max(1, tickClock(song)(song.endTick));
+  const gs = song.groups.slice().sort((a, b) => a.tick - b.tick);
+  const mid = (g) => g.notes.reduce((t, n) => t + n.s, 0) / g.notes.length;
+  let jump = 0, reach = 0, changes = 0, prev = null;
+  for (let k = 1; k < gs.length; k++) jump += Math.abs(mid(gs[k]) - mid(gs[k - 1]));
+  jump /= Math.max(1, gs.length - 1);
+  for (const g of gs) for (const n of g.notes) reach = Math.max(reach, n.f);
+  for (const c of song.chords || []) { if (c.name !== prev) changes++; prev = c.name; }
+  const nps = gs.length / sec, cpb = changes / Math.max(1, song.bars.length);
+  return nps + 0.5 * jump + 0.5 * cpb + 0.15 * Math.max(0, reach - 5);
+}
+function songLevel(song) {
+  const score = songScore(song);
+  return { score, level: 1 + LEVEL_CUTS.filter((c) => score >= c).length };
+}
+BUILTINS.forEach((s) => Object.assign(s, songLevel(s)));
 
 /* ======================= alphaTab import ======================= */
 let AT = null;
@@ -1689,14 +1898,18 @@ function bestLine(id) {
   for (const d of order) { const b = bests[`${id}:${d}`]; if (b) return `${'★'.repeat(b.stars)}${'☆'.repeat(5 - b.stars)} ${d[0].toUpperCase() + d.slice(1)}`; }
   return 'Not played yet';
 }
+// Imports saved before levels existed only have a 1-3 heat; map it onto the 1-5 scale.
+const itemLevel = (item) => item.level || [2, 3, 4][(item.heat || 1) - 1];
 function flyer(item, i, isImport) {
   const b = document.createElement('button');
-  b.className = 'flyer';
+  b.className = isImport ? 'flyer imp' : 'flyer';
   b.style.setProperty('--r', `${[-1.4, 0.9, -0.6, 1.3, -1][i % 5]}deg`);
-  const h = item.heat || 1;
-  const tag = [item.style, item.band ? 'Full band' : ''].filter(Boolean).join(', ');
-  b.innerHTML = `${tag ? `<span class="tag">${escapeHtml(tag)}</span>` : ''}<h3>${escapeHtml(item.title)}</h3><p class="by">${escapeHtml(item.artist)}</p>
-    <div class="meta"><span class="heat" aria-label="Heat ${h} of 3">${'▲'.repeat(h)}${'△'.repeat(3 - h)}</span><span class="best">${bestLine(item.id)}</span></div>`;
+  const lv = itemLevel(item);
+  const tag = [isImport ? 'Your tab' : item.genre, item.band ? 'Full band' : ''].filter(Boolean).join(' · ');
+  const by = [item.artist, item.style].filter(Boolean).join(' · ');
+  b.innerHTML = `<span class="stamp" aria-hidden="true"><small>LEVEL</small>${lv}</span>
+    <span class="tag">${escapeHtml(tag)}</span><h3>${escapeHtml(item.title)}</h3><p class="by">${escapeHtml(by)}</p>
+    <div class="meta"><span class="heat" aria-label="Level ${lv} of 5: ${LEVELS[lv - 1].name}">${LEVELS[lv - 1].name}</span><span class="best">${bestLine(item.id)}</span></div>`;
   b.onclick = () => openSetup(item, isImport);
   if (isImport) {
     const del = document.createElement('span');
@@ -1707,17 +1920,48 @@ function flyer(item, i, isImport) {
   }
   return b;
 }
+function chipRow(el, options, current, onPick) {
+  el.innerHTML = '';
+  options.forEach(([value, label]) => {
+    const c = document.createElement('button');
+    c.type = 'button'; c.className = 'chip'; c.textContent = label;
+    c.setAttribute('aria-pressed', String(value === current));
+    c.onclick = () => { onPick(value); persist(); renderSetlist(); };
+    el.appendChild(c);
+  });
+  // Keep the active chip visible in the sideways-scrolling row (without scrolling the page).
+  const on = el.querySelector('[aria-pressed="true"]');
+  if (on && (on.offsetLeft < el.scrollLeft || on.offsetLeft + on.offsetWidth > el.scrollLeft + el.clientWidth)) el.scrollLeft = on.offsetLeft - 18;
+}
 function renderSetlist() {
-  const songs = $('#songs');
-  songs.innerHTML = '';
-  const bandWrap = $('#band-songs');
-  bandWrap.innerHTML = '';
-  BUILTINS.forEach((s, i) => { s.heat = s.heat || heat(s); (s.band ? bandWrap : songs).appendChild(flyer(s, i, false)); });
+  const genres = GENRES.filter((g) => BUILTINS.some((s) => s.genre === g));
+  if (!genres.includes(setupPrefs.genre)) setupPrefs.genre = '';
+  chipRow($('#genre-chips'), [['', 'All genres'], ...genres.map((g) => [g, g])], setupPrefs.genre, (v) => { setupPrefs.genre = v; });
+  chipRow($('#level-chips'), [[0, 'Any level'], ...LEVELS.map((L, k) => [k + 1, `Level ${k + 1}`])], setupPrefs.level, (v) => { setupPrefs.level = v; });
+  const shelves = $('#shelves');
+  shelves.innerHTML = '';
+  let n = 0;
+  LEVELS.forEach((L, k) => {
+    const lv = k + 1;
+    if (setupPrefs.level && setupPrefs.level !== lv) return;
+    const list = BUILTINS.filter((s) => s.level === lv && (!setupPrefs.genre || s.genre === setupPrefs.genre)).sort((a, b) => a.score - b.score);
+    if (!list.length) return;
+    const h = document.createElement('h2');
+    h.className = 'shelf';
+    h.innerHTML = `Level ${lv}: ${escapeHtml(L.name)}<small>${escapeHtml(L.blurb)}</small>`;
+    const grid = document.createElement('div');
+    grid.className = 'songs';
+    list.forEach((s) => grid.appendChild(flyer(s, n++, false)));
+    shelves.append(h, grid);
+  });
+  $('#empty-note').hidden = n > 0;
   const yours = $('#yours');
   yours.innerHTML = '';
   $('#yours-title').hidden = !imports.length;
   imports.forEach((s, i) => yours.appendChild(flyer(s, i + 2, true)));
 }
+
+$('#show-all').onclick = () => { setupPrefs.genre = ''; setupPrefs.level = 0; persist(); renderSetlist(); };
 
 let setupItem = null, setupScore = null;
 async function openSetup(item, isImport) {
@@ -1799,7 +2043,7 @@ $('#import-form').addEventListener('submit', async (e) => {
     if (!tracks.length) throw new UserError('That tab has no 6-string guitar track Pickwork can play.');
     const song = scoreToSong(score, tracks[0].i, item.id);
     if (!song.groups.length) throw new UserError('That tab has no notes on its guitar track.');
-    Object.assign(item, { band: song.band, title: song.title === 'Untitled tab' ? item.name.replace(/\.[^.]+$/, '') : song.title, artist: song.artist, heat: heat(song), track: tracks[0].i });
+    Object.assign(item, { band: song.band, title: song.title === 'Untitled tab' ? item.name.replace(/\.[^.]+$/, '') : song.title, artist: song.artist, heat: heat(song), level: songLevel(song).level, track: tracks[0].i });
     imports.push(item);
     persist();
     if (!localStorage.getItem(KEY)?.includes(item.id)) {

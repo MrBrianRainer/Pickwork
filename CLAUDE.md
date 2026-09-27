@@ -69,6 +69,22 @@ right.
 note set automatically (beat-aligned thinning). This already works for every
 song, built-in or imported, and doesn't need new work.
 
+### Levels and genres (setlist organization)
+- **Genre** (`genre:` in `built()`, must be one of `GENRES`) is the browse category:
+  Fingerstyle, Classic Rock, Modern Rock, Pop, Country & Folk, Ballad, Reggae, Punk.
+  `built()` throws if it's missing. `style:` is now free-text flavor ("12-bar boogie"),
+  shown after the artist on the poster.
+- **Level 1–5** is computed, never hand-set: `songScore()` =
+  notes/sec + 0.5×avg string jump + 0.5×chord changes per bar + 0.15×frets above 5,
+  on the full Arena note set at 100% speed. `LEVEL_CUTS = [2, 3, 4, 5]`. Names live in
+  `LEVELS` (Open Mic → Headliner). Imports get a level at import time; older imports
+  fall back from their 1–3 `heat`.
+- Setlist = genre chips + level chips (saved in `setupPrefs.genre/level`), then one
+  shelf per level, songs sorted by score. The poster's old ▲ heat meter was replaced by
+  the level stamp + level name.
+- Backing patterns added for the new genres: `d: 'onedrop' | 'punk'`,
+  `b: 'alt' | 'dub'`, `g: 'skank'`.
+
 ### Storage
 `localStorage` under key `pickwork.v2`: settings, per-song/difficulty best
 scores (`bests`), imported tabs (`imports`). Song list for the setlist UI comes
