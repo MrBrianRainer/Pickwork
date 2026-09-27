@@ -111,6 +111,24 @@
   .row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
   .error { margin: 0; color: var(--bad); font-weight: 600; }
 
+  /* ---------- Tuner ---------- */
+  .tuner-sheet { justify-items: center; text-align: center; }
+  .tuner-dial { position: relative; width: 100%; max-width: 280px; }
+  .tuner-arc { width: 100%; display: block; overflow: visible; }
+  .tuner-arc path { stroke: var(--line); }
+  .tuner-arc line { stroke: var(--dim); transform-origin: 100px 110px; transition: stroke .15s, transform .1s; }
+  .tuner-arc.in-tune line { stroke: var(--good); }
+  .tuner-arc.close line { stroke: var(--yellow); }
+  .tuner-readout { position: absolute; left: 0; right: 0; bottom: 4px; display: grid; justify-items: center; gap: 2px; }
+  .tuner-note { font-family: 'Anton', Impact, sans-serif; font-weight: 400; font-size: 3rem; line-height: 1; }
+  .tuner-cents { font-weight: 700; color: var(--dim); }
+  .tuner-cents.in-tune { color: var(--good); }
+  .tuner-strings { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 8px; width: 100%; }
+  .tuner-strings button { border: 2px solid var(--line); background: var(--ink); border-radius: 10px; padding: 10px 4px; font-weight: 800; }
+  .tuner-strings button.active { background: var(--yellow); color: var(--ink); border-color: var(--ink); }
+  .tuner-strings button small { display: block; font-weight: 400; color: var(--dim); font-size: .7rem; }
+  .tuner-strings button.active small { color: var(--ink); }
+
   /* ---------- Game ---------- */
   .game { position: fixed; inset: 0; overflow: hidden; background:
       radial-gradient(70% 50% at 50% -10%, rgba(255,46,136,.28), transparent 70%),
@@ -198,11 +216,18 @@
 <section class="setlist" id="setlist">
   <div class="top">
     <h1 class="logo">Pickwork</h1>
-    <button class="round" id="open-settings" aria-label="Settings">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
-        <path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>
-      </svg>
-    </button>
+    <div style="display:flex; gap:10px;">
+      <button class="round" id="open-tuner" aria-label="Tuner">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+          <path d="M12 3v12M12 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM7 6l5-3 5 3M7 6v5a5 5 0 0 0 10 0V6"/>
+        </svg>
+      </button>
+      <button class="round" id="open-settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+          <path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>
+        </svg>
+      </button>
+    </div>
   </div>
   <p class="tagline">Real guitar. Real notes. Your phone listens to every pluck, watches your picking hand, and keeps score.</p>
 
@@ -386,6 +411,31 @@
       <button type="button" class="btn ghost" id="clear">Clear scores</button>
       <button class="btn" value="close">Done</button>
     </div>
+  </form>
+</dialog>
+
+<!-- ===== Tuner ===== -->
+<dialog id="tuner">
+  <form method="dialog" class="sheet tuner-sheet">
+    <div class="row" style="align-items:flex-start">
+      <div>
+        <h2>Tuner</h2>
+        <p class="sub">Pluck one string at a time. Standard tuning, low to high.</p>
+      </div>
+      <button type="button" class="round" id="tuner-close" aria-label="Close">✕</button>
+    </div>
+    <div class="tuner-dial">
+      <svg viewBox="0 0 200 120" class="tuner-arc" aria-hidden="true">
+        <path d="M10 110 A90 90 0 0 1 190 110" fill="none" stroke-width="10" stroke-linecap="round" />
+        <line id="tuner-needle" x1="100" y1="110" x2="100" y2="30" stroke-width="4" stroke-linecap="round" />
+      </svg>
+      <div class="tuner-readout">
+        <div class="tuner-note" id="tuner-note">–</div>
+        <div class="tuner-cents" id="tuner-cents">Play a string</div>
+      </div>
+    </div>
+    <div class="tuner-strings" id="tuner-strings" role="group" aria-label="Reference tones"></div>
+    <p class="field-note">Tap a string above to hear its target pitch. The dial centers and turns green when you're in tune.</p>
   </form>
 </dialog>
 
@@ -1300,6 +1350,108 @@ function strongestNote() {
   }
   return bs / specMean > 6 / settings.sensitivity ? best : null;
 }
+
+/* ======================= Tuner ======================= */
+// Standalone from the rhythm-game pitch path above (which only samples the spectrum at
+// note onsets): the tuner needs a continuously-updating pitch, so it runs its own
+// analyser and a classic autocorrelation pitch detector on raw mic audio.
+const TUNER_HZ = TUNING.map((m) => 440 * Math.pow(2, (m - 69) / 12)); // open-string targets, low to high
+let tunerAn = null, tunerBuf = null, tunerTimer = null;
+function setupTunerAnalyser() {
+  if (tunerAn) return;
+  const src = ctx.createMediaStreamSource(micStream);
+  const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1000;
+  src.connect(lp);
+  tunerAn = ctx.createAnalyser(); tunerAn.fftSize = 4096;
+  lp.connect(tunerAn);
+  tunerBuf = new Float32Array(tunerAn.fftSize);
+}
+// Basic autocorrelation (ACF) pitch detector: find the lag with the strongest
+// self-similarity within the guitar's frequency range, refined by parabolic interpolation.
+function autoCorrelate(buf, sampleRate) {
+  const SIZE = buf.length;
+  let rms = 0;
+  for (let i = 0; i < SIZE; i++) rms += buf[i] * buf[i];
+  rms = Math.sqrt(rms / SIZE);
+  if (rms < 0.01) return -1; // too quiet / no string ringing
+  const minLag = Math.floor(sampleRate / 1000), maxLag = Math.min(SIZE - 1, Math.ceil(sampleRate / 60));
+  let bestLag = -1, bestCorr = 0;
+  for (let lag = minLag; lag <= maxLag; lag++) {
+    let sum = 0;
+    for (let i = 0; i < SIZE - lag; i++) sum += buf[i] * buf[i + lag];
+    if (sum > bestCorr) { bestCorr = sum; bestLag = lag; }
+  }
+  if (bestLag < 0 || bestCorr / rms < rms * SIZE * 0.05) return -1;
+  let lag = bestLag;
+  if (lag > minLag && lag < maxLag) {
+    const c = (l) => { let s = 0; for (let i = 0; i < SIZE - l; i++) s += buf[i] * buf[i + l]; return s; };
+    const y1 = c(lag - 1), y2 = bestCorr, y3 = c(lag + 1);
+    const a = (y1 + y3 - 2 * y2) / 2, b = (y3 - y1) / 2;
+    if (a) lag = lag - b / (2 * a);
+  }
+  return sampleRate / lag;
+}
+// Matches a detected frequency to the closest guitar string, folding octave errors
+// (a common autocorrelation mistake) by snapping to the nearest power-of-two multiple
+// of each string's target first.
+function closestString(freq) {
+  let best = 0, bestCents = 1e9;
+  TUNER_HZ.forEach((target, i) => {
+    const octave = Math.round(Math.log2(freq / target));
+    const folded = freq / Math.pow(2, octave);
+    const cents = 1200 * Math.log2(folded / target);
+    if (Math.abs(cents) < Math.abs(bestCents)) { bestCents = cents; best = i; }
+  });
+  return { string: best, cents: Math.round(bestCents) };
+}
+function tunerTick() {
+  tunerAn.getFloatTimeDomainData(tunerBuf);
+  const f = autoCorrelate(tunerBuf, ctx.sampleRate);
+  const note = $('#tuner-note'), cents = $('#tuner-cents'), needle = $('#tuner-needle'), arc = $('.tuner-arc');
+  if (f < 0) {
+    note.textContent = '–'; cents.textContent = 'Play a string'; cents.className = 'tuner-cents';
+    needle.style.transform = 'rotate(0deg)'; arc.className = 'tuner-arc';
+    [...document.querySelectorAll('#tuner-strings button')].forEach((b) => b.classList.remove('active'));
+    return;
+  }
+  const { string, cents: c } = closestString(f);
+  note.textContent = STR_NAMES[string];
+  const inTune = Math.abs(c) <= 5, close = Math.abs(c) <= 20;
+  cents.textContent = inTune ? 'In tune!' : `${c > 0 ? '+' : ''}${c}¢ ${c > 0 ? 'sharp' : 'flat'}`;
+  cents.className = 'tuner-cents' + (inTune ? ' in-tune' : '');
+  arc.className = 'tuner-arc' + (inTune ? ' in-tune' : close ? ' close' : '');
+  needle.style.transform = `rotate(${Math.max(-45, Math.min(45, c / 2))}deg)`;
+  [...document.querySelectorAll('#tuner-strings button')].forEach((b, i) => b.classList.toggle('active', i === string));
+}
+async function openTuner() {
+  const dlg = $('#tuner');
+  dlg.showModal();
+  try {
+    await ensureAudio();
+    await ensureMic();
+  } catch (e) {
+    $('#tuner-cents').textContent = e instanceof UserError ? e.message : 'The mic didn’t start.';
+    return;
+  }
+  setupTunerAnalyser();
+  if (tunerTimer) clearInterval(tunerTimer);
+  tunerTimer = setInterval(tunerTick, 80);
+}
+function closeTuner() {
+  if (tunerTimer) clearInterval(tunerTimer);
+  tunerTimer = null;
+}
+$('#open-tuner').onclick = openTuner;
+$('#tuner-close').onclick = () => $('#tuner').close();
+$('#tuner').addEventListener('close', closeTuner);
+$('#tuner-strings').innerHTML = STR_NAMES.map((n, i) =>
+  `<button type="button" data-i="${i}">${n}<small>${TUNER_HZ[i].toFixed(1)} Hz</small></button>`).join('');
+$('#tuner-strings').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  await ensureAudio();
+  pluck(TUNING[+btn.dataset.i], ctx.currentTime, 0.8);
+});
 
 /* ----- Sounds: click and plucked-string synth ----- */
 function click(at, accent) {

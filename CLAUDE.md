@@ -184,3 +184,36 @@ why):
   project/repo, not part of this file.
 - Visual/UI redesign beyond what's needed to show categories/levels — the
   developer has separate design feedback coming later.
+
+## Later additions (post-handoff)
+
+### Community song batch (Gemini-drafted)
+Added 5 more songs via a Gemini-drafted batch, reviewed and corrected here before
+merging: Spanish Romance (PD classical), Bourbon Street Stroll (original swing/jazz
+blues — added a new `Jazz & Blues` genre for it), Wipeout Pipeline (original surf
+rock), Iron Anvil (original metal gallop), Kingston Skank (original reggae). Two
+drafted songs ("House of the Rising Sun", "Scarborough Fair") were deliberately left
+out: PD melody, but the famous version most people know is a specific 1960s
+copyrighted arrangement (The Animals; Simon & Garfunkel) — too close to transcribe
+safely. If asked to add either, write a clearly distinct arrangement, not a
+recognizable cover of those recordings.
+When reviewing an externally-drafted song before merging: check every `ch:` chord
+name's fret tokens actually match that name's entry in `SHAPES` (a couple of the
+drafted ones didn't — one chord was voiced at the wrong neck position entirely, one
+had a stray extra note); check backing `d`/`b`/`g`/`k` values are ones `genBacking`
+actually handles; check each bar's `seq` length equals that song's `sub × ts[0]`.
+
+### Tuner
+A standalone chromatic tuner, `<dialog id="tuner">`, opened via the round icon next to
+Settings. Deliberately separate from the rhythm-game's pitch-matching code (which only
+samples the spectrum once per note-onset — too infrequent for a continuously-updating
+tuner needle): it runs its own analyser (`tunerAn`, a fresh `MediaStreamSource` off the
+same `micStream`) and a classic autocorrelation pitch detector (`autoCorrelate()`) on
+raw time-domain audio, polled every 80ms via `tunerTimer`. `closestString()` matches
+the detected frequency to the nearest of the 6 open-string targets (`TUNER_HZ`,
+derived from `TUNING`), folding octave errors by snapping to the nearest power-of-two
+multiple first — verified against synthetic sine waves at each string's frequency
+(including a doubled-frequency low-E case) before shipping. Tapping a string button
+also plays its reference pitch via the existing `pluck()` synth. Reuses `ensureAudio()`/
+`ensureMic()` so it shares (not duplicates) mic permission and the audio context with
+the rest of the app.
