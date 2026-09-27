@@ -462,6 +462,7 @@ function built({ id, title, artist, bpm, ts = [4, 4], sub, bars, part = 'pluck',
 
 /* ----- Backing band generator for built-in songs ----- */
 const PC_OF = { C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3, E: 4, F: 5, 'F#': 6, Gb: 6, G: 7, 'G#': 8, Ab: 8, A: 9, 'A#': 10, Bb: 10, B: 11 };
+const PC_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 function harmony(name) {
   const m = /^([A-G][#b]?)(m|5|6|7)?$/.exec(name || 'E5');
   const q = m[2] || '';
@@ -470,6 +471,68 @@ function harmony(name) {
 const bassRoot = (pc) => 28 + ((pc - 4 + 12) % 12);
 const powerRoot = (pc) => 40 + ((pc - 4 + 12) % 12);
 function voicing(h) { let r = 48 + h.pc; if (r < 53) r += 12; return h.ints.map((i) => r + i); }
+
+/* ----- Lead-guitar solo lines -----
+   A "solo" is nothing new to the engine: it's just single-note groups, same tok()
+   format as everything else, placed high on the neck. leadTok() finds the fret for a
+   scale degree above a root pitch class on a given string, so solos stay in key
+   without hand-picking every fret. Degrees are indices into a pentatonic scale so
+   licks read as recognizable runs rather than random notes. */
+const MIN_PENT = [0, 3, 5, 7, 10];
+const MAJ_PENT = [0, 2, 4, 7, 9];
+function leadTok(str, rootPc, deg, minor = true, minFret = 3, finger = null) {
+  const scale = minor ? MIN_PENT : MAJ_PENT;
+  const semis = scale[((deg % scale.length) + scale.length) % scale.length] + 12 * Math.floor(deg / scale.length);
+  let f = ((rootPc + semis - TUNING[str - 1]) % 12 + 12) % 12;
+  while (f < minFret) f += 12;
+  return `${finger || ''}${str}:${f}`;
+}
+// A "lick" is [slot, string, degree] triples over a bar of `slots` sub-beats; degree
+// can be negative to dip below the root. rootPc/minor describe the underlying chord.
+function lickBar(slots, notes, rootPc, minor, minFret = 3) {
+  const seq = Array(slots).fill(null);
+  notes.forEach(([slot, str, deg]) => { seq[slot] = leadTok(str, rootPc, deg, minor, minFret); });
+  return seq;
+}
+// Reusable lick shapes, one set per note density, written as scale-degree runs on one
+// or two strings. solo() below picks the set matching a song's own bar grid (so solo
+// bars line up with the rest of that song's timing) and cycles through them over a
+// chord progression. s1/s2 are [lowerString, higherString] from the song's `strings`.
+const LICKS_16 = [ // sixteenth notes, 16 slots/bar — fast songs
+  (s1, s2) => [[0, s1, 0], [2, s1, 2], [4, s1, 3], [6, s1, 2], [8, s2, 4], [10, s2, 3], [12, s2, 2], [14, s2, 0]],
+  (s1, s2) => [[0, s2, 4], [3, s2, 3], [6, s2, 2], [8, s2, 0], [10, s1, 3], [12, s1, 2], [14, s1, 0]],
+  (s1, s2) => [[0, s1, 0], [4, s1, 3], [8, s1, 2], [10, s1, 0], [12, s2, 4], [14, s2, 2]],
+  (s1, s2) => [[0, s2, 2], [2, s2, 0], [4, s1, 4], [6, s1, 3], [8, s1, 2], [12, s1, 0], [14, s2, 4]],
+  (s1, s2) => [[0, s1, 5], [2, s1, 4], [4, s1, 3], [6, s1, 2], [8, s1, 0], [12, s2, 3], [14, s2, 0]],
+  (s1, s2) => [[0, s1, 0], [2, s2, 4], [4, s1, 0], [6, s2, 3], [8, s1, 2], [10, s2, 2], [12, s1, 3], [14, s2, 0]],
+];
+const LICKS_8 = [ // eighth notes, 8 slots/bar — the common case
+  (s1, s2) => [[0, s1, 0], [1, s1, 1], [2, s1, 2], [3, s1, 3], [4, s2, 4], [5, s2, 3], [6, s2, 1], [7, s2, 0]],
+  (s1, s2) => [[0, s2, 4], [2, s2, 2], [4, s1, 3], [6, s1, 0]],
+  (s1, s2) => [[0, s1, 0], [1, s1, 2], [2, s1, 0], [3, s1, 3], [4, s2, 4], [5, s2, 3], [6, s2, 2], [7, s2, 0]],
+  (s1, s2) => [[0, s1, 0], [3, s1, 3], [4, s2, 4], [6, s2, 2], [7, s1, 0]],
+  (s1, s2) => [[0, s2, 2], [1, s2, 4], [2, s1, 3], [4, s1, 0], [6, s2, 3], [7, s2, 0]],
+];
+const LICKS_4 = [ // quarter notes, 4 slots/bar — beginner full-band songs
+  (s1, s2) => [[0, s1, 0], [1, s1, 2], [2, s2, 3], [3, s2, 0]],
+  (s1, s2) => [[0, s2, 4], [1, s2, 2], [2, s1, 3], [3, s1, 0]],
+  (s1, s2) => [[0, s1, 0], [2, s2, 3], [3, s2, 0]],
+  (s1, s2) => [[0, s2, 2], [1, s1, 3], [3, s1, 0]],
+];
+function lickSetFor(slots) { return slots <= 4 ? LICKS_4 : slots <= 8 ? LICKS_8 : LICKS_16; }
+// count: how many bars; slotsPerBar: the song's own sub × ts[0], so solo bars line up
+// with its grid; pcs: one root pitch class per bar (cycles through a progression);
+// minor: minor- vs major-pentatonic feel; strings: [lowerString, higherString].
+function solo(count, slotsPerBar, pcs, minor = true, strings = [6, 5], band = {}) {
+  const set = lickSetFor(slotsPerBar);
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    const pc = pcs[i % pcs.length];
+    const lick = set[i % set.length](...strings).filter(([slot]) => slot < slotsPerBar);
+    out.push({ seq: lickBar(slotsPerBar, lick, pc, minor), harm: PC_NAMES[pc] + (minor ? 'm' : ''), band: { ...band } });
+  }
+  return out;
+}
 function genBacking(bars, ts) {
   const ev = [];
   const beatT = (TPQ * 4) / ts[1], six = beatT / 4, barT = beatT * ts[0];
@@ -521,11 +584,13 @@ const q = (a, b, c, d) => [a, null, b, null, c, null, d, null];
 const romanceBar = (mel, first = false) =>
   ({ ch: first ? 'Em' : undefined, seq: mel.flatMap((f, b) => [`${b === 0 ? 'p1:0+' : ''}a6:${f}`, 'm5:0', 'i4:0']) });
 const arp = (bass, g, b, e) => [`p${bass}`, `i4:${g}`, `m5:${b}`, `a6:${e}`, `m5:${b}`, `i4:${g}`, `p${bass}`, `i4:${g}`];
-const CAMP = { G: ['1:3', 0, 0, 3], C: ['2:3', 0, 1, 0], D: ['3:0', 2, 3, 2], Em: ['1:0', 0, 0, 0] };
+const CAMP = { G: ['1:3', 0, 0, 3], C: ['2:3', 0, 1, 0], D: ['3:0', 2, 3, 2], Em: ['1:0', 0, 0, 0], Am: ['2:0', 2, 1, 0], Dm: ['3:0', 2, 3, 1] };
 const campBar = (ch) => ({ ch, seq: arp(...CAMP[ch]) });
 const TRAVIS = {
   C: ['p2:3', 'm6:0', 'p3:2', 'i5:1', 'p2:3', 'm6:0', 'p3:2', 'i5:1'],
   G: ['p1:3', 'm6:3', 'p3:0', 'i5:0', 'p1:3', 'm6:3', 'p3:0', 'i5:0'],
+  Am: ['p2:0', 'm6:0', 'p4:2', 'i5:1', 'p2:0', 'm6:0', 'p4:2', 'i5:1'],
+  Em: ['p1:0', 'm6:0', 'p3:2', 'i5:0', 'p1:0', 'm6:0', 'p3:2', 'i5:0'],
 };
 const rest7 = [null, null, null, null, null, null, null];
 
@@ -536,26 +601,46 @@ const BUILTINS = [
     { seq: ['p3:0', 'p2:0', 'p1:0', null] },
     { seq: ['p1:0', 'i4:0', 'p2:0', 'm5:0'] },
     { seq: ['p3:0', 'a6:0', 'i4:0', 'm5:0'] },
+    { seq: ['p1:0+i4:0', null, 'p2:0+m5:0', null] },
+    { seq: ['p3:0+a6:0', null, 'p2:0+m5:0', null] },
+    { seq: ['p1:0+i4:0', null, 'p3:0+a6:0', null] },
+    { seq: ['i4:0', 'm5:0', 'a6:0', null] },
+    { seq: ['a6:0', 'm5:0', 'i4:0', null] },
+    { seq: ['p1:0', 'p2:0', 'p3:0', null] },
+    { seq: ['p1:0', 'p2:0', 'p3:0', 'i4:0'] },
+    { seq: ['m5:0', 'a6:0', 'm5:0', 'i4:0'] },
+    { seq: ['p1:0', 'i4:0', 'p2:0', 'm5:0'] },
     { seq: ['p1:0+a6:0', null, null, null] },
   ] }),
-  alternate(built({ id: 'ode', title: 'Ode to Joy', artist: 'Ludwig van Beethoven', genre: 'Fingerstyle', style: 'Classical melody', bpm: 96, sub: 2, bars: [
+  alternate(built({ id: 'ode', title: 'Ode to Joy', artist: 'Ludwig van Beethoven', genre: 'Fingerstyle', style: 'Classical melody, with a bass-note reprise', bpm: 96, sub: 2, bars: [
     { seq: q(E4, E4, F4, G4) }, { seq: q(G4, F4, E4, D4) }, { seq: q(C4, C4, D4, E4) },
     { seq: [E4, null, null, D4, D4, null, null, null] },
     { seq: q(E4, E4, F4, G4) }, { seq: q(G4, F4, E4, D4) }, { seq: q(C4, C4, D4, E4) },
     { seq: [D4, null, null, C4, C4, null, null, null] },
+    { seq: q(`${E4}+p2:0`, E4, F4, G4) }, { seq: q(G4, F4, E4, `${D4}+p2:0`) }, { seq: q(C4, C4, D4, E4) },
+    { seq: [E4, null, null, D4, `${D4}+p2:0`, null, null, null] },
+    { seq: q(`${E4}+p2:0`, E4, F4, G4) }, { seq: q(G4, F4, E4, `${D4}+p2:0`) }, { seq: q(C4, C4, D4, E4) },
+    { seq: [D4, null, null, `${C4}+p2:0`, C4, null, null, null] },
   ] })),
-  built({ id: 'romance', title: 'Romance (opening)', artist: 'Anonymous, 19th century', genre: 'Fingerstyle', style: 'Classical arpeggio', bpm: 60, ts: [3, 4], sub: 3, bars: [
+  built({ id: 'romance', title: 'Romance (opening)', artist: 'Anonymous, 19th century; Pickwork original continuation', genre: 'Fingerstyle', style: 'Classical arpeggio', bpm: 60, ts: [3, 4], sub: 3, bars: [
     romanceBar([7, 7, 7], true), romanceBar([7, 5, 3]), romanceBar([3, 2, 0]), romanceBar([0, 3, 7]),
     romanceBar([7, 7, 7]), romanceBar([7, 5, 3]), romanceBar([3, 2, 0]), romanceBar([0, 3, 7]),
+    romanceBar([2, 3, 5]), romanceBar([5, 3, 2]), romanceBar([0, 2, 3]), romanceBar([3, 2, 0]),
+    romanceBar([2, 3, 5]), romanceBar([5, 7, 5]), romanceBar([3, 2, 0]), romanceBar([0, 3, 7]),
     { seq: ['p1:0+a6:0', null, null, null, null, null, null, null, null] },
   ] }),
   built({ id: 'campfire', title: 'Campfire Changes', artist: 'Pickwork original', genre: 'Fingerstyle', style: 'Chord arpeggios', bpm: 72, sub: 2, bars: [
     campBar('G'), campBar('C'), campBar('G'), campBar('D'), campBar('Em'), campBar('C'), campBar('D'),
+    campBar('Am'), campBar('Dm'), campBar('Am'), campBar('Em'), campBar('Am'), campBar('Dm'), campBar('Em'), campBar('Em'),
+    campBar('G'), campBar('C'), campBar('G'), campBar('D'), campBar('Em'), campBar('C'), campBar('D'),
     { ch: 'G', seq: ['p1:3+i4:0+m5:0+a6:3', ...rest7] },
   ] }),
-  built({ id: 'travis', title: 'Travis Walk', artist: 'Pickwork original', genre: 'Fingerstyle', style: 'Travis picking', bpm: 76, sub: 2, bars: [
+  built({ id: 'travis', title: 'Travis Walk', artist: 'Pickwork original', genre: 'Fingerstyle', style: 'Travis picking, with a lead break', bpm: 76, sub: 2, bars: [
     { ch: 'C', seq: TRAVIS.C }, { seq: TRAVIS.C }, { ch: 'G', seq: TRAVIS.G }, { seq: TRAVIS.G },
     { ch: 'C', seq: TRAVIS.C }, { seq: TRAVIS.C }, { ch: 'G', seq: TRAVIS.G },
+    { ch: 'Am', seq: TRAVIS.Am }, { seq: TRAVIS.Am }, { ch: 'Em', seq: TRAVIS.Em }, { seq: TRAVIS.Em },
+    ...solo(4, 8, [9, 4, 9, 0], true, [6, 5]),
+    { ch: 'C', seq: TRAVIS.C }, { ch: 'G', seq: TRAVIS.G },
     { ch: 'C', seq: ['p2:3+i5:1+m6:0', ...rest7] },
   ] }),
   ...bandSongs(),
@@ -575,16 +660,20 @@ function bandSongs() {
   const cho = (ch, extra = {}) => ({ seq: push3(PC[ch]), ch, band: { d: 'rock', b: 'eighths', g: 'push', k: 'pad', ...extra } });
   const verseGH = [{ ...riff(GH_A, { crash: true }), ch: 'E5' }, riff(GH_B), riff(GH_A), riff(GH_B, { fill: true })];
   const chorusGH = [cho('G5', { crash: true }), cho('A5'), cho('E5'), cho('D5', { fill: true })];
-  const gasoline = built({ id: 'gasoline', title: 'Gasoline Halo', artist: 'Pickwork original', genre: 'Classic Rock', style: 'Pentatonic riff', part: 'dist', bpm: 116, sub: 2,
-    bars: [...verseGH, ...chorusGH, ...verseGH, ...chorusGH, end(PC.E5, 'E5')] });
+  const gasoline = built({ id: 'gasoline', title: 'Gasoline Halo', artist: 'Pickwork original', genre: 'Classic Rock', style: 'Pentatonic riff, with a solo', part: 'dist', bpm: 116, sub: 2,
+    bars: [...verseGH, ...chorusGH, ...verseGH, ...chorusGH,
+      ...solo(8, 8, [7, 9, 4, 2], true, [6, 5], { d: 'rock', b: 'eighths', k: 'pad' }),
+      ...chorusGH, end(PC.E5, 'E5')] });
 
   // 2. Classic rock: 12-bar boogie in A
   const boog = (lo, fr) => { const a = `${lo}+${fr}2`, b = `${lo}+${fr}4`; return [a, a, b, b, a, a, b, b]; };
   const BG = { A5: boog('2:0', '3:'), D5: boog('3:0', '4:'), E5: boog('1:0', '2:') };
   const bb = (ch, extra = {}) => ({ seq: BG[ch], ch, harm: ch[0], band: { d: 'boogie', b: 'boogie', k: 'organ', ...extra } });
-  const rustbelt = built({ id: 'rustbelt', title: 'Rust Belt Boogie', artist: 'Pickwork original', genre: 'Classic Rock', style: '12-bar boogie', part: 'dist', bpm: 138, sub: 2,
+  const rustbelt = built({ id: 'rustbelt', title: 'Rust Belt Boogie', artist: 'Pickwork original', genre: 'Classic Rock', style: '12-bar boogie, with a solo chorus', part: 'dist', bpm: 138, sub: 2,
     bars: [bb('A5', { crash: true }), bb('A5'), bb('A5'), bb('A5'), bb('D5', { crash: true }), bb('D5'), bb('A5'), bb('A5'),
-      bb('E5', { crash: true }), bb('D5'), bb('A5'), bb('E5', { fill: true }), end('2:0+3:2', 'A5', 'A')] });
+      bb('E5', { crash: true }), bb('D5'), bb('A5'), bb('E5', { fill: true }),
+      ...solo(12, 8, [9, 9, 9, 9, 2, 2, 9, 9, 4, 2, 9, 4], true, [6, 5], { d: 'boogie', b: 'boogie', k: 'organ' }),
+      end('2:0+3:2', 'A5', 'A')] });
 
   // 3. Modern rock: palm-muted chug riff, big chorus
   const SB1 = ['1:0', '1:0', '1:0', '2:3', '1:0', '1:0', '2:5', '2:3'];
@@ -592,17 +681,21 @@ function bandSongs() {
   const chug = (seq, extra = {}) => ({ seq, harm: 'E5', band: { d: 'drive', b: 'eighths', g: 'chug', ...extra } });
   const big = (ch, extra = {}) => ({ seq: q4(PC[ch]), ch, band: { d: 'drive', b: 'eighths', g: 'ring', k: 'pad', ...extra } });
   const chorusSB = (fill) => [big('C5', { crash: true }), big('G5'), big('D5'), big('E5', { fill })];
-  const staticBloom = built({ id: 'static', title: 'Static Bloom', artist: 'Pickwork original', genre: 'Modern Rock', style: 'Palm-muted chug', part: 'dist', bpm: 144, sub: 2,
-    bars: [{ ...chug(SB1, { crash: true }), ch: 'E5' }, chug(SB2), chug(SB1), chug(SB2, { fill: true }), ...chorusSB(false), ...chorusSB(true),
-      { ...chug(SB1, { crash: true }), ch: 'E5' }, chug(SB2, { fill: true }), end(PC.E5, 'E5')] });
+  const staticBloom = built({ id: 'static', title: 'Static Bloom', artist: 'Pickwork original', genre: 'Modern Rock', style: 'Palm-muted chug, with a solo', part: 'dist', bpm: 144, sub: 2,
+    bars: [{ ...chug(SB1, { crash: true }), ch: 'E5' }, chug(SB2), chug(SB1), chug(SB2, { fill: true }), ...chorusSB(false),
+      { ...chug(SB1, { crash: true }), ch: 'E5' }, chug(SB2), chug(SB1), chug(SB2, { fill: true }), ...chorusSB(true),
+      ...solo(8, 8, [0, 7, 2, 4], true, [6, 5], { d: 'drive', b: 'eighths', k: 'pad' }),
+      ...chorusSB(true), end(PC.E5, 'E5')] });
 
   // 4. Modern rock: fingerpicked indie arpeggios that build
   const pl = (bass, g, b, e) => [`p${bass}`, `i4:${g}`, `m5:${b}`, `i4:${g}`, `a6:${e}`, `i4:${g}`, `m5:${b}`, `i4:${g}`];
   const PLC = { Em: ['1:0', 0, 0, 0], C: ['2:3', 0, 1, 0], G: ['1:3', 0, 0, 3], D: ['3:0', 2, 3, 2] };
   const lan = (ch, band) => ({ seq: pl(...PLC[ch]), ch, band });
   const run = (band, crashFirst, fillLast) => ['Em', 'C', 'G', 'D'].map((ch, i) => lan(ch, { ...band, crash: crashFirst && i === 0, fill: fillLast && i === 3 }));
-  const lanterns = built({ id: 'lanterns', title: 'Paper Lanterns', artist: 'Pickwork original', genre: 'Modern Rock', style: 'Fingerpicked build', bpm: 96, sub: 2,
+  const lanterns = built({ id: 'lanterns', title: 'Paper Lanterns', artist: 'Pickwork original', genre: 'Modern Rock', style: 'Fingerpicked build, with a solo', bpm: 96, sub: 2,
     bars: [...run({ b: 'whole', k: 'pad' }, false, false), ...run({ d: 'half', b: 'half', k: 'pad' }, true, true),
+      ...run({ d: 'rock', b: 'eighths', k: 'pad' }, true, true),
+      ...solo(8, 8, [4, 0, 7, 2, 4, 0, 7, 2], true, [6, 5], { d: 'rock', b: 'eighths', k: 'pad' }),
       ...run({ d: 'rock', b: 'eighths', k: 'pad' }, true, true), end('p1:0+i4:0+m5:0+a6:0', 'Em', 'Em')] });
 
   // 5. Pop: synth-pop hook, then chord stabs
@@ -617,9 +710,11 @@ function bandSongs() {
   const popB = (extra = {}) => ({ d: 'four', b: 'pop', k: 'pad', ...extra });
   const prog = ['C', 'G', 'Am', 'F'];
   const hook = (last) => prog.map((ch, i) => ({ seq: i === 3 ? H[last] : H[i], ch, band: popB({ crash: i === 0 }) }));
-  const neon = built({ id: 'neon', title: 'Neon Heartline', artist: 'Pickwork original', genre: 'Pop', style: 'Synth-pop hook', bpm: 112, sub: 2,
+  const neon = built({ id: 'neon', title: 'Neon Heartline', artist: 'Pickwork original', genre: 'Pop', style: 'Synth-pop hook, with a solo', bpm: 112, sub: 2,
     bars: [{ seq: Array(8).fill(null), ch: 'C', band: { b: 'pop', k: 'pad' } }, { seq: Array(8).fill(null), ch: 'G', band: { b: 'pop', k: 'pad', fill: true } },
       ...hook(3), ...hook(4), ...prog.map((ch, i) => ({ seq: push3(PCH[ch]), ch, band: popB({ crash: i === 0, fill: i === 3 }) })),
+      ...solo(4, 8, [0, 7, 9, 5], false, [6, 5], { b: 'pop', k: 'pad' }),
+      ...hook(4),
       end(PCH.C, 'C', 'C')] });
 
   return [gasoline, rustbelt, staticBloom, lanterns, neon];
@@ -641,19 +736,31 @@ function moreSongs() {
     { seq: ['p1:0', null, 'p2:0', null] }, { seq: ['p3:0', null, null, null] },
     { seq: ['i4:0', null, 'm5:0', null] }, { seq: ['a6:0', null, 'm5:0', null] },
     { seq: ['i4:0', null, 'm5:0', null] }, { seq: ['p1:0', null, null, null] },
+    { seq: ['p1:0+i4:0', null, null, null] }, { seq: ['p2:0+m5:0', null, null, null] },
+    { seq: ['p3:0+a6:0', null, null, null] }, { seq: ['p2:0+m5:0', null, null, null] },
+    { seq: ['i4:0', null, 'a6:0', null] }, { seq: ['m5:0', null, 'a6:0', null] },
+    { seq: ['p1:0', null, 'p3:0', null] }, { seq: ['p2:0', null, null, null] },
+    { seq: ['p1:0', null, 'p2:0', null] }, { seq: ['p3:0', null, 'p2:0', null] },
+    { seq: ['i4:0', null, 'm5:0', null] }, { seq: ['p1:0+a6:0', null, null, null] },
   ] });
 
   // Top three strings only, waltz time, two fretted notes.
   const lullaby = built({ id: 'lullaby', title: 'Three String Lullaby', artist: O, genre: 'Fingerstyle', style: 'Treble-string waltz', bpm: 66, ts: [3, 4], sub: 1, bars: [
     { seq: ['i4:0', 'm5:0', 'a6:0'] }, { seq: ['a6:0', 'm5:0', 'i4:0'] }, { seq: ['i4:0', 'm5:1', 'a6:0'] }, { seq: ['m5:0', null, null] },
     { seq: ['i4:0', 'm5:0', 'a6:3'] }, { seq: ['a6:0', 'm5:1', 'm5:0'] }, { seq: ['i4:0', 'm5:0', 'a6:0'] }, { seq: ['a6:0', null, null] },
+    { seq: ['a6:0', 'a6:3', 'm5:1'] }, { seq: ['m5:0', 'i4:0', 'a6:0'] }, { seq: ['a6:3', 'm5:1', 'i4:0'] }, { seq: ['m5:0', null, null] },
+    { seq: ['i4:0', 'a6:0', 'a6:3'] }, { seq: ['m5:1', 'm5:0', 'i4:0'] }, { seq: ['a6:0', 'm5:0', 'i4:0'] }, { seq: ['a6:0', null, null] },
+    { seq: ['i4:0', 'm5:0', 'a6:0'] }, { seq: ['a6:0', 'm5:0', 'i4:0'] }, { seq: ['i4:0', 'm5:1', 'a6:0'] }, { seq: ['m5:0', null, null] },
   ] });
 
   // Pinch on beat one, alternating bass on three.
   const PS = { G: ['1:3', '3:0', 0, 0, 3], Em: ['1:0', '3:2', 0, 0, 0], C: ['2:3', '3:2', 0, 1, 0], D: ['3:0', '2:0', 2, 3, 2] };
   const swing = (ch) => { const [b, alt, g, bb, e] = PS[ch]; return { ch, seq: [`p${b}+a6:${e}`, null, `i4:${g}`, null, `p${alt}`, null, `m5:${bb}`, null] }; };
-  const porch = built({ id: 'porch', title: 'Porch Swing', artist: O, genre: 'Fingerstyle', style: 'Thumb and pinch', bpm: 80, sub: 2,
-    bars: once([...['G', 'G', 'Em', 'Em', 'C', 'C', 'D', 'D', 'G', 'Em', 'C', 'D'].map(swing), { ch: 'G', seq: ['p1:3+a6:3', ...R(7)] }]) });
+  const porch = built({ id: 'porch', title: 'Porch Swing', artist: O, genre: 'Fingerstyle', style: 'Thumb and pinch, with a lead break', bpm: 80, sub: 2,
+    bars: once([...['G', 'G', 'Em', 'Em', 'C', 'C', 'D', 'D', 'G', 'Em', 'C', 'D'].map(swing),
+      ...['G', 'G', 'Em', 'Em', 'C', 'C', 'D', 'D', 'G', 'Em', 'C', 'D'].map(swing),
+      ...solo(4, 8, [7, 4, 0, 2], true, [6, 5]),
+      { ch: 'G', seq: ['p1:3+a6:3', ...R(7)] }]) });
 
   // Harder than Romance: sixteenth-note p-i-m-a arpeggios through minor-key changes.
   const CS = { Am: ['2:0', '3:2', 2, 1, 0], Dm: ['3:0', '2:0', 2, 3, 1], E: ['1:0', '2:2', 1, 0, 0], F: ['3:3', '2:3', 2, 1, 1],
@@ -663,8 +770,10 @@ function moreSongs() {
     const half = (bass) => [`p${bass}`, `i4:${g}`, `m5:${bb}`, `a6:${e}`, `m5:${bb}`, `i4:${g}`, `m5:${bb}`, `i4:${g}`];
     return { ch, seq: [...half(b), ...half(alt)] };
   };
-  const cascade = built({ id: 'cascade', title: 'Cascade Etude', artist: O, genre: 'Fingerstyle', style: 'Sixteenth-note arpeggios', bpm: 84, sub: 4,
-    bars: once([...['Am', 'Dm', 'E', 'Am', 'F', 'G', 'C', 'E7', 'Am', 'Dm', 'B7', 'E', 'F', 'E7', 'Am'].map(casc), { ch: 'Am', seq: ['p2:0+a6:0', ...R(15)] }]) });
+  const cascade = built({ id: 'cascade', title: 'Cascade Etude', artist: O, genre: 'Fingerstyle', style: 'Sixteenth-note arpeggios, with a cadenza', bpm: 84, sub: 4,
+    bars: once([...['Am', 'Dm', 'E', 'Am', 'F', 'G', 'C', 'E7', 'Am', 'Dm', 'B7', 'E', 'F', 'E7', 'Am'].map(casc),
+      ...solo(8, 16, [9, 2, 4, 5], true, [6, 5]),
+      { ch: 'Am', seq: ['p2:0+a6:0', ...R(15)] }]) });
 
   // Harder than Travis Walk: steady alternating thumb with a syncopated melody on top, ragtime changes.
   const RT = { C: ['2:3', '4:0', '3:2', '4:0'], A7: ['2:0', '4:0', '3:2', '4:0'], D7: ['3:0', '4:2', '2:0', '4:2'], G7: ['1:3', '4:0', '3:0', '4:0'] };
@@ -676,6 +785,7 @@ function moreSongs() {
     rag('G7', ['m5:0', 'a6:1', 'm5:3', 'a6:1']), rag('G7', ['m5:0', 'a6:1', 'm5:0', null], 'a6:1'),
     rag('C', ['m5:1', 'a6:0', 'a6:3', 'm5:1']), rag('A7', ['m5:2', 'a6:0', 'a6:3', 'a6:0']),
     rag('D7', ['a6:2', 'm5:1', 'a6:2', 'm5:3']), rag('G7', ['m5:0', 'a6:1', 'm5:3', 'a6:1']),
+    ...solo(4, 8, [0, 9, 2, 7], false, [6, 5]),
     { ch: 'C', seq: ['p2:3+m5:1+a6:0', ...R(7)] },
   ]) });
 
@@ -683,10 +793,12 @@ function moreSongs() {
   const bandEnd = (notes, slots, harm, extra = {}) => ({ seq: [notes, ...R(slots - 1)], ch: harm, harm, band: { d: 'end', b: 'hit', g: 'hit', ...extra } });
   const whole = (ch, extra = {}) => ({ ch, seq: [PC[ch], null, null, null], band: { d: 'rock', b: 'half', g: 'ring', ...extra } });
   const halves = (ch, extra = {}) => ({ ch, seq: [PC[ch], null, PC[ch], null], band: { d: 'rock', b: 'eighths', g: 'ring', k: 'organ', ...extra } });
-  const firstGig = built({ id: 'firstgig', title: 'First Gig Jitters', artist: O, genre: 'Classic Rock', style: 'Big power chords', part: 'dist', bpm: 88, sub: 1, bars: once([
+  const firstGig = built({ id: 'firstgig', title: 'First Gig Jitters', artist: O, genre: 'Classic Rock', style: 'Big power chords, with a solo', part: 'dist', bpm: 88, sub: 1, bars: once([
     whole('E5', { crash: true }), whole('A5'), whole('E5'), whole('A5', { fill: true }),
     whole('D5', { crash: true }), whole('A5'), whole('E5'), whole('E5', { fill: true }),
     halves('G5', { crash: true }), halves('A5'), halves('E5'), halves('D5', { fill: true }),
+    halves('G5', { crash: true }), halves('A5'), halves('E5'), halves('E5', { fill: true }),
+    ...solo(4, 4, [4, 9, 2, 4], true, [6, 5], { d: 'rock', b: 'half', g: 'ring' }),
     halves('G5', { crash: true }), halves('A5'), halves('E5'), halves('E5', { fill: true }),
     bandEnd(PC.E5, 4, 'E5'),
   ]) });
@@ -695,20 +807,24 @@ function moreSongs() {
   // Boom-chuck: bass note, strum, alternate bass, strum.
   const DR = { G: ['1:3', '3:0'], C: ['2:3', '1:3'], D: ['3:0', '2:0'] };
   const two = (ch, extra = {}) => ({ ch, seq: [DR[ch][0], TRI[ch], DR[ch][1], TRI[ch]], band: { d: 'boogie', b: 'alt', ...extra } });
-  const dustRoad = built({ id: 'dustroad', title: 'Dust Road Two-Step', artist: O, genre: 'Country & Folk', style: 'Boom-chuck', bpm: 104, sub: 1, bars: once([
+  const dustRoad = built({ id: 'dustroad', title: 'Dust Road Two-Step', artist: O, genre: 'Country & Folk', style: 'Boom-chuck, with a fiddle-style break', bpm: 104, sub: 1, bars: once([
     two('G', { crash: true }), two('G'), two('C'), two('G'), two('G'), two('G'), two('D'), two('D', { fill: true }),
     two('G', { crash: true }), two('G'), two('C'), two('C'), two('G'), two('D'), two('G'), two('G', { fill: true }),
+    ...solo(4, 4, [7, 0, 7, 2], false, [6, 5], { d: 'boogie', b: 'alt' }),
+    two('G', { crash: true }), two('D', { fill: true }),
     bandEnd(`1:3+${TRI.G}`, 4, 'G', { g: undefined }),
   ]) });
 
   // Folk-rock strum: sparse in the verse, full down-up rhythm in the chorus.
   const verseStrum = (ch, extra = {}) => ({ ch, seq: [TRI[ch], null, null, null, TRI[ch], null, TRI[ch], null], band: { d: 'half', b: 'half', k: 'organ', ...extra } });
   const fullStrum = (ch, extra = {}) => ({ ch, seq: [TRI[ch], null, TRI[ch], TRI[ch], null, TRI[ch], TRI[ch], null], band: { d: 'rock', b: 'eighths', k: 'organ', g: 'ring', ...extra } });
-  const millTown = built({ id: 'milltown', title: 'Mill Town Anthem', artist: O, genre: 'Country & Folk', style: 'Folk-rock strum', bpm: 120, sub: 2, bars: once([
+  const millTown = built({ id: 'milltown', title: 'Mill Town Anthem', artist: O, genre: 'Country & Folk', style: 'Folk-rock strum, with a solo', bpm: 120, sub: 2, bars: once([
     verseStrum('D'), verseStrum('A'), verseStrum('Bm'), verseStrum('G'),
     verseStrum('D'), verseStrum('A'), verseStrum('Bm'), verseStrum('G', { fill: true }),
     fullStrum('G', { crash: true }), fullStrum('A'), fullStrum('D'), fullStrum('Bm'),
     fullStrum('G'), fullStrum('A'), fullStrum('D'), fullStrum('D', { fill: true }),
+    ...solo(8, 8, [2, 9, 11, 7, 2, 9, 11, 7], false, [6, 5], { d: 'rock', b: 'eighths', k: 'organ' }),
+    fullStrum('G', { crash: true }), fullStrum('A'), fullStrum('D'), fullStrum('D', { fill: true }),
     bandEnd(TRI.D, 8, 'D', { g: 'hit' }),
   ]) });
 
@@ -716,8 +832,10 @@ function moreSongs() {
   const LT = { C: ['2:3', 0, 1, 0], Am: ['2:0', 2, 1, 0], F: ['3:3', 2, 1, 1], G: ['1:3', 0, 0, 3] };
   const tide = (ch, band) => { const [b, g, bb, e] = LT[ch]; return { ch, band, seq: [`p${b}`, null, `i4:${g}`, `m5:${bb}`, `a6:${e}`, null, `m5:${bb}`, null] }; };
   const tideRun = (band, fillLast) => ['C', 'Am', 'F', 'G'].map((ch, i) => tide(ch, { ...band, crash: band.d && i === 0, fill: fillLast && i === 3 }));
-  const lowTide = built({ id: 'lowtide', title: 'Low Tide Letters', artist: O, genre: 'Ballad', style: 'Slow arpeggio ballad', bpm: 66, sub: 2, bars: [
-    ...tideRun({ b: 'whole', k: 'pad' }, false), ...tideRun({ d: 'half', b: 'half', k: 'pad' }, true), ...tideRun({ d: 'half', b: 'half', k: 'pad' }, true),
+  const lowTide = built({ id: 'lowtide', title: 'Low Tide Letters', artist: O, genre: 'Ballad', style: 'Slow arpeggio ballad, with a solo', bpm: 66, sub: 2, bars: [
+    ...tideRun({ b: 'whole', k: 'pad' }, false), ...tideRun({ d: 'half', b: 'half', k: 'pad' }, true),
+    ...solo(8, 8, [0, 9, 5, 7, 0, 9, 5, 7], false, [6, 5], { d: 'half', b: 'half', k: 'pad' }),
+    ...tideRun({ d: 'half', b: 'half', k: 'pad' }, true),
     { ch: 'C', seq: ['p2:3+i4:0+m5:1+a6:0', ...R(7)], band: { d: 'end', b: 'hit', k: 'pad' } },
   ] });
 
@@ -731,9 +849,11 @@ function moreSongs() {
     D: [null, '6:2', null, '5:3', null, '6:2', null, null],
   };
   const riddim = (ch, extra = {}) => ({ ch, seq: TUNE[ch], band: { d: 'onedrop', b: 'dub', k: 'organ', g: 'skank', ...extra } });
-  const tinRoof = built({ id: 'tinroof', title: 'Tin Roof Riddim', artist: O, genre: 'Reggae', style: 'One-drop skank', bpm: 76, sub: 2, bars: [
+  const tinRoof = built({ id: 'tinroof', title: 'Tin Roof Riddim', artist: O, genre: 'Reggae', style: 'One-drop skank, with a solo', bpm: 76, sub: 2, bars: [
     skank('Am', { crash: true }), skank('D'), skank('Am'), skank('D', { fill: true }),
     riddim('C', { crash: true }), riddim('G'), riddim('Am'), riddim('D'), riddim('C'), riddim('G'), riddim('Am'), riddim('D', { fill: true }),
+    ...solo(8, 8, [0, 7, 9, 2, 0, 7, 9, 2], true, [6, 5], { d: 'onedrop', b: 'dub', k: 'organ' }),
+    riddim('C', { crash: true }), riddim('G'), riddim('Am'), riddim('D', { fill: true }),
     skank('Am', { crash: true }), skank('D'), skank('Am'), skank('D', { fill: true }),
     { ch: 'Am', seq: [TRI.Am, ...R(7)], band: { d: 'end', b: 'hit', k: 'pad' } },
   ] });
@@ -742,8 +862,10 @@ function moreSongs() {
   const down = (ch, extra = {}) => ({ ch, seq: R(8).fill(PC[ch]), band: { d: 'punk', b: 'eighths', g: 'chug', ...extra } });
   const verseR = (fill) => [down('E5', { crash: true }), down('E5'), down('A5'), down('B5', { fill })];
   const chorusR = (fill) => [down('D5', { crash: true }), down('A5'), down('E5'), down('B5', { fill })];
-  const riot = built({ id: 'riot', title: 'Three Chord Riot', artist: O, genre: 'Punk', style: 'Nonstop downstrokes', part: 'dist', bpm: 180, sub: 2,
-    bars: once([...verseR(false), ...verseR(true), ...chorusR(false), ...chorusR(true), ...verseR(true), ...chorusR(true), bandEnd(PC.E5, 8, 'E5')]) });
+  const riot = built({ id: 'riot', title: 'Three Chord Riot', artist: O, genre: 'Punk', style: 'Nonstop downstrokes, with a solo', part: 'dist', bpm: 180, sub: 2,
+    bars: once([...verseR(false), ...verseR(true), ...chorusR(false), ...chorusR(true),
+      ...solo(4, 8, [4, 9, 2, 11], true, [6, 5], { d: 'punk', b: 'eighths', g: 'chug' }),
+      ...verseR(true), ...chorusR(true), bandEnd(PC.E5, 8, 'E5')]) });
 
   /* ---- Pop ---- */
   const HOOK = {
@@ -756,10 +878,11 @@ function moreSongs() {
   const popProg = ['G', 'D', 'Em', 'C'];
   const hookRun = () => popProg.map((ch, i) => ({ ch, seq: HOOK[ch], band: pp({ crash: i === 0, fill: i === 3 }) }));
   const stab = (ch) => [TRI[ch], null, null, TRI[ch], null, null, TRI[ch], null];
-  const polaroid = built({ id: 'polaroid', title: 'Polaroid Summer', artist: O, genre: 'Pop', style: 'Bright pop riff', bpm: 104, sub: 2, bars: [
+  const polaroid = built({ id: 'polaroid', title: 'Polaroid Summer', artist: O, genre: 'Pop', style: 'Bright pop riff, with a solo', bpm: 104, sub: 2, bars: [
     { ch: 'G', seq: R(8), band: { b: 'pop', k: 'pad' } }, { ch: 'D', seq: R(8), band: { b: 'pop', k: 'pad', fill: true } },
     ...hookRun(), ...hookRun(),
     ...popProg.map((ch, i) => ({ ch, seq: stab(ch), band: pp({ crash: i === 0, fill: i === 3 }) })),
+    ...solo(4, 8, [7, 2, 4, 0], false, [6, 5], { b: 'pop', k: 'pad' }),
     ...hookRun(),
     { ch: 'G', seq: [TRI.G, ...R(7)], band: { d: 'end', b: 'hit', k: 'pad' } },
   ] });

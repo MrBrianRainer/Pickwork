@@ -85,6 +85,31 @@ song, built-in or imported, and doesn't need new work.
 - Backing patterns added for the new genres: `d: 'onedrop' | 'punk'`,
   `b: 'alt' | 'dub'`, `g: 'skank'`.
 
+### Song structure and lead-guitar solos
+All 22 built-in songs are now full arrangements (intro/verse/chorus/solo/outro-style),
+not single 8-16 bar loops — 20-90s each instead of ~10-20s.
+- A "solo" needs no new engine support: it's ordinary single-note `groups`, just placed
+  high on the neck instead of in a chord shape. The helper for it lives right after
+  `voicing()`: `leadTok(str, rootPc, deg, minor, minFret)` finds the fret for a
+  pentatonic scale degree above a root pitch class on a string (wraps to stay >= 3rd
+  fret); `lickBar()` places a set of `[slot, string, degree]` triples into a bar;
+  `LICKS_4/8/16` are reusable lick shapes at three densities (quarter/eighth/sixteenth
+  notes); `solo(count, slotsPerBar, pcs, minor, strings, band)` is the entry point —
+  pass **`slotsPerBar` = that song's own `sub × ts[0]`** (this is the one thing to get
+  right: solo bars must match the song's bar-grid or notes land at the wrong time) and
+  a pitch-class per bar to follow the chord progression underneath.
+- Every band song got: verse, chorus, verse, chorus, an 8-bar `solo()` (4 for shorter/
+  easier songs), then a final chorus. Fingerstyle songs got a new B-section or reprise;
+  the more advanced ones (Travis Walk, Porch Swing, Cascade Etude, Rail Yard Rag) also
+  got an unaccompanied `solo()`-based break.
+- `romance` and `ode` are the two PD-arrangement songs; per the copyright rule above,
+  their new sections are ORIGINAL continuations in the same style, not more of the real
+  piece transcribed from memory — don't replace them with an actual transcription later
+  without checking the source is legally obtained.
+- Adding solos pushed several songs' computed level up (more string-jumping/reach from
+  the higher-fret lead lines) — level numbers shifted from the previous batch; this is
+  expected, not a bug, since level is meant to track exactly that.
+
 ### Storage
 `localStorage` under key `pickwork.v2`: settings, per-song/difficulty best
 scores (`bests`), imported tabs (`imports`). Song list for the setlist UI comes
