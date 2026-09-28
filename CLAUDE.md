@@ -295,3 +295,30 @@ available to Claude): RMS decays smoothly with no NaN/clipping, and high-frequen
 energy drops to ~0 within ~1s while the note keeps ringing - matches the intended
 physical behavior. Whether it actually sounds better is for a human to judge; ask before
 changing this again, since it's tuned by feel, not by a spec.
+
+### Real guitar samples, not synthesis
+Two synthesis attempts (plain Karplus-Strong, then a "richer" two-line version) both
+sounded wrong in different ways - "robotic," then "like an organ" (summing two
+near-identical periodic tones is literally how a chorus/organ effect is built). Since
+nothing here can hear the result to judge parameters, switched the acoustic `pluck()`
+path to real recorded guitar notes instead of guessing at more DSP: an openly-licensed
+General MIDI soundfont (FluidR3_GM, the same one many open-source music projects use),
+loaded lazily like alphaTab/pdf.js (`loadGuitarSoundfont()`, `GUITAR_SF_URL`).
+- The file is legacy MIDI.js format, not clean JSON: parsing needs to skip past an
+  opening `var MIDI = {};` (the first `{` in the file isn't the note-data object) and
+  strip a trailing comma before the closing brace (valid JS, not valid JSON).
+- Its keys spell accidentals with flats (`Bb0`, `Db1`), not sharps - `SF_NOTE_NAMES`
+  reflects that; using the sharp spelling elsewhere in this file (`NOTE_NAMES`) would
+  silently miss every accidental note.
+- `pluck(midi, at, vel, out)` keeps its exact old signature; every existing call site
+  (gameplay, the tuner's reference tones, the "Hear it" preview) is unchanged. It now
+  checks `sampleCache` for a decoded real sample first and only falls back to the old
+  synthesized `pluckBuffer()` if that note's sample is missing.
+- Sample decoding is async (`decodeAudioData`) but `pluck()` itself is not, so every
+  note a song will need is preloaded and awaited in `startGame()` (and the tuner's 6
+  open strings in `openTuner()`) *before* real-time scheduling begins - decoding
+  on-demand inside `pluck()` would risk a note missing its exact scheduled time.
+- One-time cost: ~2MB fetched once (browser-cached after, same as any other CDN asset
+  here) and ~750ms until the first song's specific notes are decoded and ready
+  (subsequent songs are near-instant, reusing already-decoded notes) - covered by the
+  existing "Warming up…" button state, no separate loading UI needed.

@@ -1644,6 +1644,7 @@ async function openTuner() {
   dlg.showModal();
   try {
     await ensureAudio();
+    preloadGuitarSamples(TUNING); // reference-tone buttons; don't block mic setup on this
     await ensureMic();
   } catch (e) {
     $('#tuner-cents').textContent = e instanceof UserError ? e.message : 'The mic didn’t start.';
@@ -1680,62 +1681,79 @@ function click(at, accent) {
   o.connect(g); g.connect(ctx.destination);
   o.start(at); o.stop(at + 0.06);
 }
+/* ----- Real guitar samples (with a synthesized fallback) -----
+   Two attempts at synthesizing a plucked string (Karplus-Strong, then a "richer"
+   two-line version) both sounded synthetic in different ways - the second one like an
+   organ, because summing two near-identical periodic tones is literally how a chorus/
+   organ effect is built. Nothing here can hear the result to judge it, so instead of
+   continuing to guess at DSP parameters, actual recorded guitar notes are used: an
+   openly-licensed General MIDI soundfont (FluidR3_GM, widely used across open-source
+   music projects) converted to per-note mp3s. Loaded lazily, same pattern as alphaTab/
+   pdf.js, and only fetched once (~2MB, browser-cached after).
+   pluckBuffer()'s synthesized tone is kept as a fallback for a note whose sample fails
+   to load, so a missing/blocked network request degrades instead of going silent. */
+const GUITAR_SF_URL = 'https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/acoustic_guitar_steel-mp3.js';
+// This soundfont spells accidentals with flats ("Bb0", "Db1"), not sharps.
+const SF_NOTE_NAMES = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
+let guitarSF = null;
+async function loadGuitarSoundfont() {
+  if (!guitarSF) {
+    try {
+      const text = await (await fetch(GUITAR_SF_URL)).text();
+      // The file also opens with a small `var MIDI = {};` before the real note data
+      // object, so the first '{' in the whole file isn't the one we want; and it has a
+      // trailing comma before its closing brace, which JS allows but JSON.parse doesn't.
+      const dataStart = text.indexOf('{', text.indexOf('Soundfont.acoustic_guitar_steel'));
+      const objText = text.slice(dataStart, text.lastIndexOf('}') + 1).replace(/,(\s*})/g, '$1');
+      guitarSF = JSON.parse(objText);
+    } catch { guitarSF = {}; } // missing samples fall back to the synth below, not a hard error
+  }
+  return guitarSF;
+}
+const sampleCache = new Map(); // midi -> AudioBuffer, or null if that note has no sample
+async function guitarSample(midi) {
+  if (sampleCache.has(midi)) return sampleCache.get(midi);
+  const sf = await loadGuitarSoundfont();
+  const clamped = Math.max(21, Math.min(108, Math.round(midi))); // this soundfont covers A0-C8
+  const name = SF_NOTE_NAMES[((clamped % 12) + 12) % 12] + (Math.floor(clamped / 12) - 1);
+  const dataUri = sf[name];
+  let buf = null;
+  if (dataUri) {
+    try { buf = await ctx.decodeAudioData(await (await fetch(dataUri)).arrayBuffer()); }
+    catch { buf = null; }
+  }
+  sampleCache.set(midi, buf);
+  return buf;
+}
+// Called once when a song starts (or the tuner opens) so every note it needs is already
+// decoded before real-time scheduling begins - decodeAudioData is async and pluck()
+// below is not, so this can't happen lazily inside pluck() itself without notes
+// sometimes missing their exact scheduled time.
+async function preloadGuitarSamples(midiList) {
+  await Promise.all([...new Set(midiList)].map((m) => guitarSample(m).catch(() => null)));
+}
+
 const pluckCache = new Map();
 function pluckBuffer(midi) {
   if (pluckCache.has(midi)) return pluckCache.get(midi);
-  const sr = ctx.sampleRate, f = 440 * Math.pow(2, (midi - 69) / 12), len = Math.floor(sr * 2.2);
+  const sr = ctx.sampleRate, f = 440 * Math.pow(2, (midi - 69) / 12), len = Math.floor(sr * 2);
   const buf = ctx.createBuffer(1, len, sr), d = buf.getChannelData(0);
-  // Two Karplus-Strong delay lines a hair apart in length, summed together, instead of
-  // one: a single perfect period repeats too exactly to sound like a real string (which
-  // has slight, constantly-shifting imperfections) - this is most of why a bare KS pluck
-  // reads as "robotic" even before anything else changes.
-  const N1 = Math.max(2, Math.round(sr / f));
-  const N2 = Math.max(2, Math.round(sr / (f * 1.006)));
-  // Real strings ring longer and darker the thicker/lower they are; a fixed damping
-  // coefficient for every note is another giveaway. brightness 0 = low E, ~1 = high frets.
-  const brightness = Math.min(1, Math.max(0, (midi - 38) / 45));
-  const damp = 0.9975 - 0.0025 * brightness;
-  const tone = 0.35 + 0.4 * brightness; // how much of the average-filter darkens the loop
-  const makeLine = (N) => {
-    const line = new Float32Array(len);
-    for (let i = 0; i < N; i++) line[i] = Math.random() * 2 - 1;
-    for (let i = 1; i < N; i++) line[i] = 0.5 * (line[i] + line[i - 1]);
-    for (let i = N; i < len; i++) {
-      const avg = 0.5 * (line[i - N] + line[i - N + 1]);
-      line[i] = damp * (tone * avg + (1 - tone) * line[i - N]);
-    }
-    return line;
-  };
-  const l1 = makeLine(N1), l2 = makeLine(N2);
-  for (let i = 0; i < len; i++) d[i] = (l1[i] + l2[i]) * 0.5;
+  const N = Math.max(2, Math.round(sr / f));
+  for (let i = 0; i < N; i++) d[i] = Math.random() * 2 - 1;
+  for (let i = 1; i < N; i++) d[i] = 0.5 * (d[i] + d[i - 1]);
+  for (let i = N; i < len; i++) d[i] = 0.996 * 0.5 * (d[i - N] + d[i - N + 1]);
   pluckCache.set(midi, buf);
   return buf;
 }
 function pluck(midi, at, vel = 0.6, out = null) {
   const dest = out || getMaster();
   const startAt = Math.max(at, ctx.currentTime);
-  const f0 = 440 * Math.pow(2, (midi - 69) / 12);
-  // Body tone: a lowpass that starts brighter than the note's steady tone and settles
-  // as the string decays, the way a real plucked string's harmonics die off faster than
-  // its fundamental - a flat spectrum for the whole note is what reads as synthetic.
-  const body = ctx.createBiquadFilter();
-  body.type = 'lowpass'; body.Q.value = 0.6;
-  body.frequency.setValueAtTime(Math.min(12000, f0 * 9 + 2500), startAt);
-  body.frequency.exponentialRampToValueAtTime(Math.max(500, f0 * 1.8), startAt + 1.3);
   const s = ctx.createBufferSource(), g = ctx.createGain();
-  s.buffer = pluckBuffer(midi);
-  g.gain.value = vel * 0.48;
-  s.connect(body); body.connect(g); g.connect(dest);
+  const sample = sampleCache.get(midi);
+  s.buffer = sample || pluckBuffer(midi);
+  g.gain.value = sample ? vel * 0.9 : vel * 0.45;
+  s.connect(g); g.connect(dest);
   s.start(startAt);
-  // Pick attack: real plucking/fingerpicking has a short percussive transient before
-  // the string's tone settles in, which a pure Karplus-Strong loop has none of at all.
-  const pickSrc = ctx.createBufferSource(), pickFilt = ctx.createBiquadFilter(), pickGain = ctx.createGain();
-  pickSrc.buffer = noise();
-  pickFilt.type = 'bandpass'; pickFilt.frequency.value = Math.min(9000, f0 * 2.5 + 1200); pickFilt.Q.value = 1.1;
-  pickGain.gain.setValueAtTime(vel * 0.16, startAt);
-  pickGain.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.018);
-  pickSrc.connect(pickFilt); pickFilt.connect(pickGain); pickGain.connect(dest);
-  pickSrc.start(startAt); pickSrc.stop(startAt + 0.03);
 }
 
 /* ----- Band synth ----- */
@@ -1948,6 +1966,7 @@ async function startGame(song, opts) {
   err.hidden = true;
   try {
     await ensureAudio();
+    if (song.part !== 'dist') await preloadGuitarSamples(song.groups.flatMap((g) => g.notes.map((n) => n.midi)));
     if (opts.mode !== 'demo') await ensureMic();
     if (opts.cam && opts.mode !== 'demo') await ensureCam();
   } catch (e) {
