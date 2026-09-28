@@ -255,3 +255,21 @@ rock arrangement. Rests and dotted notes aren't decoded (defaults to the nearest
 duration) — `PDF_DUR_GLYPH` only maps flag glyphs currently; the `restQuarter`/
 `augmentationDot` codepoints are known (see the SMuFL registry:
 github.com/w3c/smufl/tree/gh-pages/metadata) but not wired up.
+
+### PDF import: rhythm default fixed (8th -> quarter)
+A song ("Breakeven") reconstructed with wrong-feeling rhythm even though the notes
+themselves were right, and was hard to describe as a specific error - turned out to be
+the note-duration default, not a note-position bug. Investigated with real per-file
+glyph counts: a whole 5-page PDF can contain a single eighth-note flag glyph, because
+real notation draws a beam *line* connecting consecutive same-duration notes rather than
+a flag glyph on each one - beams aren't parsed at all here, so an isolated flag glyph
+being found is the rare case, not the common one. The old default of 8th note only
+"worked" for Stairway/Classical Gas by coincidence, because those two happen to be
+genuinely continuous fast arpeggios; it was never really reading their rhythm either.
+Fixed: default is now a quarter note (correct per notation convention: a stem with no
+flag *is* a quarter note), with a same-measure flag glyph only trusted within `unit * 2`
+of the note's x position. Verified no regression on Stairway/Classical Gas (same measure
+counts, `.tex` output makes structural sense) before and after.
+Real remaining gap, not yet worth the complexity: rests and beam-grouped rhythm still
+aren't decoded, so a song with genuine rhythmic variety (some quarter, some eighth
+notes, real rests) will still only be roughly right, not exact.

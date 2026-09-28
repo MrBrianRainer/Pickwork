@@ -1327,7 +1327,7 @@ async function extractTabFromPdf(arrayBuffer) {
       candidates.sort((a, b) => Math.abs(a.yMax - top0) - Math.abs(b.yMax - top0));
       const barsX = candidates[0].xs;
       if (barsX.length < 2) return;
-      const sysGlyphs = allGlyphs.filter((g) => g.pi === pi && g.y > top0 - unit * 3 && g.y < top0 + unit * 6);
+      const sysGlyphs = allGlyphs.filter((g) => g.pi === pi && g.y > top0 - unit * 10 && g.y < top0 + unit * 6);
 
       for (let bi = 0; bi < barsX.length - 1; bi++) {
         const x0 = barsX[bi], x1 = barsX[bi + 1];
@@ -1366,7 +1366,13 @@ async function extractTabFromPdf(arrayBuffer) {
         });
       });
       if (notesHere.length) {
-        let dur = 8, bestD = 999;
+        // A stem with no flag glyph is a quarter note in standard notation - that's the
+        // right default, not an eighth (checked against two real files: consecutive
+        // same-duration notes are drawn with a connecting beam line, not a flag glyph
+        // per note, so an isolated flag glyph is genuinely rare - it's not a fallback
+        // for an edge case, it's the common case. A song whose real rhythm is mostly
+        // quarter notes sounded badly wrong at a flat eighth-note default).
+        let dur = 4, bestD = unit * 2;
         m.durs.forEach(([gx, code]) => {
           const d = Math.abs(gx - cx);
           if (d < bestD) { bestD = d; dur = PDF_DUR_GLYPH[code]; }
