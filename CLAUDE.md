@@ -273,3 +273,25 @@ counts, `.tex` output makes structural sense) before and after.
 Real remaining gap, not yet worth the complexity: rests and beam-grouped rhythm still
 aren't decoded, so a song with genuine rhythmic variety (some quarter, some eighth
 notes, real rests) will still only be roughly right, not exact.
+
+### Plucked-string sound: less robotic
+The acoustic `pluck()`/`pluckBuffer()` synth (used for every fingerstyle note, every
+imported-tab note, and the tuner's reference tones) was a bare single-loop Karplus-Strong
+string with a fixed damping coefficient for every note - correct in principle but thin
+and synthetic-sounding, especially compared to the deliberately-electric `dist` synth
+used for full-band songs. Improved without adding any new audio nodes' worth of
+complexity to the call sites (`pluck()` still takes the same `(midi, at, vel, out)`):
+- Two Karplus-Strong delay lines a fraction of a percent apart in length, summed, instead
+  of one - a single exact-period loop repeats too cleanly to read as a real string.
+- Damping now varies by register (`brightness` in `pluckBuffer`): bass notes ring longer
+  and darker, treble notes decay faster and brighter, rather than one coefficient for
+  every string.
+- `pluck()` adds a body-tone lowpass that starts bright and settles over ~1.3s (real
+  harmonics die off faster than the fundamental - a static spectrum for the whole note
+  is a classic synthetic tell), plus a short bandpass-filtered noise transient at onset
+  for the pick/finger-attack real strings have and a pure KS loop doesn't.
+Verified by rendering a note through an `AnalyserNode` rather than by ear (which isn't
+available to Claude): RMS decays smoothly with no NaN/clipping, and high-frequency
+energy drops to ~0 within ~1s while the note keeps ringing - matches the intended
+physical behavior. Whether it actually sounds better is for a human to judge; ask before
+changing this again, since it's tuned by feel, not by a spec.
