@@ -1745,15 +1745,32 @@ function pluckBuffer(midi) {
   pluckCache.set(midi, buf);
   return buf;
 }
-function pluck(midi, at, vel = 0.6, out = null) {
+function pluck(midi, at, vel = 0.6, out = null, dur = null) {
   const dest = out || getMaster();
   const startAt = Math.max(at, ctx.currentTime);
   const s = ctx.createBufferSource(), g = ctx.createGain();
   const sample = sampleCache.get(midi);
   s.buffer = sample || pluckBuffer(midi);
-  g.gain.value = sample ? vel * 0.9 : vel * 0.45;
+  const peak = sample ? vel * 0.9 : vel * 0.45;
+  // Each recorded sample rings for 3+ seconds on its own - fine for one note in
+  // isolation, but a real song triggers a new note every few hundred ms, so playing
+  // every sample's *full* natural tail stacks dozens of long, already-reverberant
+  // recordings on top of each other. That cumulative wash - not the sample itself - is
+  // what actually sounds like an organ/reverb pad: a real player lets the next pluck
+  // (or the phrase ending) cut the previous one short, so this does too, releasing
+  // roughly in time with the gap to the next note instead of the sample's full length.
+  const natural = sample ? sample.duration : 2;
+  const ring = Math.min(natural, Math.max(0.3, (dur || 0.5) * 1.6));
+  if (ring < natural - 0.05) {
+    g.gain.setValueAtTime(peak, startAt);
+    g.gain.setValueAtTime(peak, startAt + Math.max(0.05, ring * 0.35));
+    g.gain.exponentialRampToValueAtTime(0.0008, startAt + ring);
+  } else {
+    g.gain.value = peak;
+  }
   s.connect(g); g.connect(dest);
   s.start(startAt);
+  s.stop(startAt + ring + 0.05);
 }
 
 /* ----- Band synth ----- */
@@ -1862,7 +1879,7 @@ function playTone(kind, notes, at, dur, vel, out, mute = false) {
 function playEvent(e, at, out, speed) {
   const dur = Math.max(0.06, (e.dur || 0.25) / speed), v = e.vel ?? 1;
   if (e.kind === 'drum') playDrum(e.drum, at, v, out);
-  else if (e.kind === 'pluck') e.notes.forEach((m) => pluck(m, at, 0.55 * v, out));
+  else if (e.kind === 'pluck') e.notes.forEach((m) => pluck(m, at, 0.55 * v, out, dur));
   else playTone(e.kind, e.notes, at, dur, v, out, e.mute);
 }
 
@@ -2038,7 +2055,7 @@ function scheduleAudio() {
       if (at >= ctx.currentTime - 0.02) {
         const notes = g.notes.map((n) => n.midi);
         if (G.song.part === 'dist') playTone('dist', notes, at, Math.max(0.12, g.dur * 0.9 / G.speed), 1.1, G.bus, g.dur < 0.3);
-        else notes.forEach((m) => pluck(m, at, 0.7, G.bus));
+        else notes.forEach((m) => pluck(m, at, 0.7, G.bus, g.dur / G.speed));
       }
       G.schedGroup++;
     }
@@ -2751,7 +2768,7 @@ $('#hear').onclick = async () => {
   await ensureAudio();
   const g = nextPending();
   if (!g) return;
-  g.notes.forEach((n, k) => pluck(n.midi, ctx.currentTime + 0.02 + k * 0.03, 0.8));
+  g.notes.forEach((n, k) => pluck(n.midi, ctx.currentTime + 0.02 + k * 0.03, 0.8, null, 0.9));
   G.listenUntil = ctx.currentTime + 1.4;
 };
 $('#skip').onclick = () => {

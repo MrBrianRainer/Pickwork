@@ -322,3 +322,23 @@ loaded lazily like alphaTab/pdf.js (`loadGuitarSoundfont()`, `GUITAR_SF_URL`).
   here) and ~750ms until the first song's specific notes are decoded and ready
   (subsequent songs are near-instant, reusing already-decoded notes) - covered by the
   existing "Warming up…" button state, no separate loading UI needed.
+
+### Real samples still sounded like an organ/reverb - the fix wasn't the samples
+After switching to real recordings, the developer reported the *exact same* organ/reverb
+complaint as the synthesized version. That's a strong signal the samples themselves
+weren't the problem: each recorded note rings for 3+ seconds on its own, and `pluck()`
+was playing that full natural tail every time with no cutoff. A real song triggers a new
+note every few hundred ms, so dozens of long, already-reverberant recordings were
+stacking on top of each other - a sustained, blended wash is exactly what that produces,
+independent of how good the underlying sample is.
+Fixed: `pluck(midi, at, vel, out, dur)` takes an optional note-duration hint and releases
+the sample's gain (hold, then exponential decay) in roughly that time instead of letting
+it ring its full recorded length - mimicking how a real next-pluck (or phrase ending)
+cuts a note short. Wired real durations through from the two call sites that have them
+(`playEvent`'s pluck-track case, and the demo-mode gameplay scheduler); the tuner and
+"Hear it" preview use a shorter fixed duration since they're single/quick reference notes,
+not full-speed playback.
+Verified via AnalyserNode rather than by ear: a single note with a short duration hint
+now decays to near-silence within ~0.5s (was ringing past 3s), and a simulated fast
+8-note passage stays at bounded energy throughout rather than climbing - both match the
+expected fix, but whether it's audibly resolved is for the developer to confirm.
